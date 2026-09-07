@@ -21,7 +21,7 @@ jobs:
       - name: Upload sideload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FlightBuddy-debug
+          name: flightbuddy-apk
           path: app/build/outputs/apk/debug/*.apk
       - name: Attach APK to GitHub Release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')

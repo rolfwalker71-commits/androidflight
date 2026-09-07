@@ -1,0 +1,22 @@
+# Copy to gradle-local.properties (gitignored) if this machine has a local JDK
+# and you want Gradle / ./gradlew to use it without exporting JAVA_HOME.
+#
+# Gradle does not read this file automatically; settings.gradle.kts and
+# ./gradlew apply org.gradle.java.home from it. Only homes whose native
+# launcher exists on *this* OS are forwarded (bin/java on Linux, bin/java.exe
+# on Windows), so one shared file can list both WSL and Windows paths.
+#
+#   org.gradle.java.home=/absolute/path/to/jdk-17
+#   org.gradle.java.installations.paths=<comma-separated JDK homes>
+#
+# Example (this machine — WSL + Windows Android Studio):
+#   org.gradle.java.home=/home/rolf/.jdks/jdk-17
+#   org.gradle.java.installations.paths=/home/rolf/.jdks/jdk-17,C:\\Users\\rolf\\.jdks\\jdk-17,C:\\Users\\rolf\\.jdks\\jbr-21.0.11
+#
+# Example (Linux / WSL only):
+#   org.gradle.java.home=/home/you/.jdks/jdk-17
+#   org.gradle.java.installations.paths=/home/you/.jdks/jdk-17
+#
+# Example (Windows-only copy of the file):
+#   org.gradle.java.home=C:\\Users\\you\\.jdks\\jbr-21.0.11
+#   org.gradle.java.installations.paths=C:\\Users\\you\\.jdks\\jdk-17,C:\\Users\\you\\.jdks\\jbr-21.0.11

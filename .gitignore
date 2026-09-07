@@ -1,0 +1,41 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+local.properties
+secrets.properties
+*.jks
+*.keystore
+keystore.properties
+
+# Machine-specific Gradle JVM (org.gradle.java.home)
+gradle-local.properties
+.jdk
+
+
+# Gradle / Android
+.gradle/
+build/
+**/build/
+captures/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+*.hprof
+.navigation/

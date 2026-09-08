@@ -15,6 +15,7 @@ import de.rolfwalker.flightbuddy.core.data.FlightRepository
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.domain.airlineCodeForLogo
 import de.rolfwalker.flightbuddy.core.domain.airlineInitials
+import de.rolfwalker.flightbuddy.core.ui.status.progressMarkerDrawable
 import de.rolfwalker.flightbuddy.ui.MainActivity
 import kotlinx.coroutines.runBlocking
 import org.koin.core.context.GlobalContext
@@ -101,10 +102,18 @@ internal object RemoteFlightWidget {
             ContextCompat.getColor(context, chipColorRes(model.chip)),
         )
 
-        views.setTextViewText(R.id.widget_from_iata, model.fromIata)
-        views.setTextViewText(R.id.widget_to_iata, model.toIata)
+        if (model.showRouteIata) {
+            views.setViewVisibility(R.id.widget_from_iata, View.VISIBLE)
+            views.setViewVisibility(R.id.widget_to_iata, View.VISIBLE)
+            views.setTextViewText(R.id.widget_from_iata, model.fromIata)
+            views.setTextViewText(R.id.widget_to_iata, model.toIata)
+        } else {
+            views.setViewVisibility(R.id.widget_from_iata, View.GONE)
+            views.setViewVisibility(R.id.widget_to_iata, View.GONE)
+        }
+        views.setImageViewResource(R.id.widget_plane, progressMarkerDrawable(model.progressMarker))
         views.setProgressBar(R.id.widget_progress, 100, model.progress, false)
-        positionPlane(context, views, minW, model.progress)
+        positionMarker(context, views, minW, model.progress, model.showRouteIata)
 
         views.setTextViewText(R.id.widget_dep_time, model.dep.effective)
         views.setTextColor(
@@ -128,9 +137,16 @@ internal object RemoteFlightWidget {
         return views
     }
 
-    private fun positionPlane(context: Context, views: RemoteViews, minWidthDp: Int, percent: Int) {
+    private fun positionMarker(
+        context: Context,
+        views: RemoteViews,
+        minWidthDp: Int,
+        percent: Int,
+        showIata: Boolean,
+    ) {
         val density = context.resources.displayMetrics.density
-        val trackDp = (minWidthDp - 16 - 28 - 28).coerceAtLeast(48)
+        val iataReserve = if (showIata) 28 + 28 else 0
+        val trackDp = (minWidthDp - 16 - iataReserve).coerceAtLeast(48)
         val leftDp = (((trackDp - WidgetPlane.sizeDp) * percent) / 100).coerceAtLeast(0)
         views.setViewPadding(R.id.widget_plane, (leftDp * density).toInt(), 0, 0, 0)
     }

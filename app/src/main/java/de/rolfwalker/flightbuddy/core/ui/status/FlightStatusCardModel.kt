@@ -20,6 +20,9 @@ const val PREFLIGHT_BAR_WINDOW_MS = 4L * 60 * 60 * 1000
 
 enum class FlightStatusBarKind { PREFLIGHT, INFLIGHT, LANDED, HIDDEN }
 
+/** Marker on the status bar. Preflight uses a process icon; airborne/landed keep the plane. */
+enum class FlightProgressMarker { PLANE, LUGGAGE, SCHEDULE }
+
 data class FlightStatusBarState(
     val kind: FlightStatusBarKind,
     val percent: Int,
@@ -43,6 +46,9 @@ data class FlightStatusCardModel(
     val countdown: String,
     val fromIata: String,
     val toIata: String,
+    /** False while the 4h preflight bar is showing — no von/nach IATA beside the track. */
+    val showRouteIata: Boolean,
+    val progressMarker: FlightProgressMarker,
     val progress: Int,
     val dep: FlightStatusLegClock,
     val arr: FlightStatusLegClock,
@@ -70,6 +76,8 @@ fun flightStatusCardModel(
         countdown = flightStatusCountdown(context, bar),
         fromIata = f.fromIata?.trim().orEmpty().ifBlank { "––" },
         toIata = f.toIata?.trim().orEmpty().ifBlank { "––" },
+        showRouteIata = showsRouteIata(bar),
+        progressMarker = progressMarkerFor(bar, chip),
         progress = bar.percent.coerceIn(0, 100),
         dep = legClock(f.scheduledDep, f.estimatedDep, f.actualDep, f.delayMinutes, shown),
         arr = legClock(f.scheduledArr, f.estimatedArr, f.actualArr, null, shown),
@@ -213,6 +221,28 @@ fun routeLine(f: FlightEntity): String {
 fun hoursAndMinutes(remainingMs: Long): Pair<Int, Int> {
     val totalMin = (remainingMs.coerceAtLeast(0L) / 60_000L).toInt()
     return totalMin / 60 to totalMin % 60
+}
+
+/** Hide von/nach IATA while the aircraft is still on the 4h preflight bar. */
+fun showsRouteIata(bar: FlightStatusBarState): Boolean =
+    bar.kind != FlightStatusBarKind.PREFLIGHT
+
+/**
+ * Boarding → suitcase. Other on-ground preflight (Pünktlich, Verspätet) → clock.
+ * After takeoff / landed → plane. The marker rides [FlightStatusBarState.percent].
+ */
+fun progressMarkerFor(bar: FlightStatusBarState, chip: FlightStatus): FlightProgressMarker {
+    if (bar.kind != FlightStatusBarKind.PREFLIGHT) return FlightProgressMarker.PLANE
+    return when (chip) {
+        FlightStatus.BOARDING -> FlightProgressMarker.LUGGAGE
+        else -> FlightProgressMarker.SCHEDULE
+    }
+}
+
+fun progressMarkerDrawable(marker: FlightProgressMarker): Int = when (marker) {
+    FlightProgressMarker.PLANE -> R.drawable.widget_plane
+    FlightProgressMarker.LUGGAGE -> R.drawable.widget_luggage
+    FlightProgressMarker.SCHEDULE -> R.drawable.widget_schedule
 }
 
 fun hasStatusDeparted(

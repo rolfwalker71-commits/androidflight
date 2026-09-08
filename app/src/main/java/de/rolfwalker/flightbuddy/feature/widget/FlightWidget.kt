@@ -58,8 +58,10 @@ import de.rolfwalker.flightbuddy.core.domain.isPastStatus
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.ui.isLegDelayed
 import de.rolfwalker.flightbuddy.core.ui.resolveLegTimes
+import de.rolfwalker.flightbuddy.core.ui.status.FlightProgressMarker
 import de.rolfwalker.flightbuddy.core.ui.status.flightProgressPercent
 import de.rolfwalker.flightbuddy.core.ui.status.flightStatusLabel
+import de.rolfwalker.flightbuddy.core.ui.status.progressMarkerDrawable
 import de.rolfwalker.flightbuddy.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -288,7 +290,13 @@ private fun WidgetBody(context: Context, flight: FlightEntity?, iata: String?, l
                 )
             }
             Spacer(GlanceModifier.height(3.dp))
-            RoutePlaneRow(model.fromIata, model.toIata, model.progress / 100f)
+            RoutePlaneRow(
+                from = model.fromIata,
+                to = model.toIata,
+                fraction = model.progress / 100f,
+                showIata = model.showRouteIata,
+                marker = model.progressMarker,
+            )
             Spacer(GlanceModifier.height(2.dp))
             BigTimesRow(context, model)
             if (wide) {
@@ -321,23 +329,32 @@ private fun WidgetBody(context: Context, flight: FlightEntity?, iata: String?, l
 }
 
 @Composable
-private fun RoutePlaneRow(from: String, to: String, fraction: Float) {
-    val avail = (LocalSize.current.width - 72.dp).coerceAtLeast(40.dp)
-    val planeAt = (avail * fraction.coerceIn(0f, 1f)).coerceAtLeast(0.dp)
+private fun RoutePlaneRow(
+    from: String,
+    to: String,
+    fraction: Float,
+    showIata: Boolean,
+    marker: FlightProgressMarker,
+) {
+    val iataReserve = if (showIata) 72.dp else 16.dp
+    val avail = (LocalSize.current.width - iataReserve).coerceAtLeast(40.dp)
+    val markerAt = (avail * fraction.coerceIn(0f, 1f)).coerceAtLeast(0.dp)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = GlanceModifier.fillMaxWidth(),
     ) {
-        Text(
-            from,
-            style = TextStyle(
-                color = WidgetColors.primaryText,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            ),
-            maxLines = 1,
-        )
-        Spacer(GlanceModifier.width(6.dp))
+        if (showIata) {
+            Text(
+                from,
+                style = TextStyle(
+                    color = WidgetColors.primaryText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                maxLines = 1,
+            )
+            Spacer(GlanceModifier.width(6.dp))
+        }
         Box(
             modifier = GlanceModifier.defaultWeight().height(WidgetPlane.sizeDp.dp),
             contentAlignment = Alignment.CenterStart,
@@ -352,31 +369,33 @@ private fun RoutePlaneRow(from: String, to: String, fraction: Float) {
             if (fraction > 0f) {
                 Box(
                     modifier = GlanceModifier
-                        .width(planeAt.coerceAtLeast(4.dp))
+                        .width(markerAt.coerceAtLeast(4.dp))
                         .height(3.dp)
                         .cornerRadius(2.dp)
                         .background(WidgetColors.accent),
                 ) {}
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Spacer(GlanceModifier.width(planeAt))
+                Spacer(GlanceModifier.width(markerAt))
                 Image(
-                    provider = ImageProvider(R.drawable.widget_plane),
+                    provider = ImageProvider(progressMarkerDrawable(marker)),
                     contentDescription = "progress",
                     modifier = GlanceModifier.size(WidgetPlane.sizeDp.dp),
                 )
             }
         }
-        Spacer(GlanceModifier.width(6.dp))
-        Text(
-            to,
-            style = TextStyle(
-                color = WidgetColors.primaryText,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            ),
-            maxLines = 1,
-        )
+        if (showIata) {
+            Spacer(GlanceModifier.width(6.dp))
+            Text(
+                to,
+                style = TextStyle(
+                    color = WidgetColors.primaryText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                maxLines = 1,
+            )
+        }
     }
 }
 

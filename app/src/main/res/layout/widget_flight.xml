@@ -154,6 +154,7 @@
                     android:progress="0"
                     android:progressDrawable="@drawable/widget_progress" />
 
+                <!-- Src swapped at bind: plane in flight, luggage/schedule on the 4h preflight fill. -->
                 <ImageView
                     android:id="@+id/widget_plane"
                     android:layout_width="24dp"

@@ -142,7 +142,13 @@ fun FlightStatusCard(
             )
         }
         Spacer(Modifier.height(8.dp))
-        RoutePlaneRow(model.fromIata, model.toIata, model.progress / 100f)
+        RoutePlaneRow(
+            from = model.fromIata,
+            to = model.toIata,
+            fraction = model.progress / 100f,
+            showIata = model.showRouteIata,
+            marker = model.progressMarker,
+        )
         Spacer(Modifier.height(4.dp))
         BigTimesRow(model)
         if (!model.depStand.isNullOrBlank() || !model.arrStand.isNullOrBlank()) {
@@ -225,7 +231,13 @@ private fun StatusChip(status: FlightStatus) {
 }
 
 @Composable
-private fun RoutePlaneRow(from: String, to: String, fraction: Float) {
+private fun RoutePlaneRow(
+    from: String,
+    to: String,
+    fraction: Float,
+    showIata: Boolean,
+    marker: FlightProgressMarker,
+) {
     val fill = MaterialTheme.colorScheme.primary
     val track = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
     val pct = fraction.coerceIn(0f, 1f)
@@ -233,16 +245,18 @@ private fun RoutePlaneRow(from: String, to: String, fraction: Float) {
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            from,
-            style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-        )
-        Spacer(Modifier.width(6.dp))
+        if (showIata) {
+            Text(
+                from,
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(6.dp))
+        }
         BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
@@ -266,7 +280,7 @@ private fun RoutePlaneRow(from: String, to: String, fraction: Float) {
                 )
             }
             Image(
-                painter = painterResource(R.drawable.widget_plane),
+                painter = painterResource(progressMarkerDrawable(marker)),
                 contentDescription = null,
                 colorFilter = ColorFilter.tint(fill),
                 modifier = Modifier
@@ -275,16 +289,18 @@ private fun RoutePlaneRow(from: String, to: String, fraction: Float) {
                     .align(Alignment.CenterStart),
             )
         }
-        Spacer(Modifier.width(6.dp))
-        Text(
-            to,
-            style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-        )
+        if (showIata) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                to,
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+        }
     }
 }
 

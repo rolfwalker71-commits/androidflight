@@ -116,7 +116,7 @@ internal object WidgetPins {
     }
 }
 
-class FlightBuddyWidget : GlanceAppWidget() {
+open class FlightBuddyWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -129,6 +129,9 @@ class FlightBuddyWidget : GlanceAppWidget() {
         }
     }
 }
+
+/** Same card as [FlightBuddyWidget], placed as a 5×2 target on 5-column launchers. */
+class FlightBuddyWidget5x2 : FlightBuddyWidget()
 
 /** First LIVE, else first upcoming, else first tracked. Null only when the list is empty. */
 internal fun pickDefaultFlight(flights: List<FlightEntity>): FlightEntity? {
@@ -688,13 +691,26 @@ class FlightWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget = FlightBuddyWidget()
 }
 
+class FlightWidget5x2Receiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget = FlightBuddyWidget5x2()
+}
+
 class WidgetUpdater(private val context: Context) : KoinComponent {
     private val repo: FlightRepository by inject()
 
     suspend fun updateAll(changedFlightIds: Set<String> = emptySet()) {
         val manager = GlanceAppWidgetManager(context)
-        val widget = FlightBuddyWidget()
-        manager.getGlanceIds(FlightBuddyWidget::class.java).forEach { id ->
+        updateClass(manager, FlightBuddyWidget(), FlightBuddyWidget::class.java, changedFlightIds)
+        updateClass(manager, FlightBuddyWidget5x2(), FlightBuddyWidget5x2::class.java, changedFlightIds)
+    }
+
+    private suspend fun updateClass(
+        manager: GlanceAppWidgetManager,
+        widget: GlanceAppWidget,
+        clazz: Class<out GlanceAppWidget>,
+        changedFlightIds: Set<String>,
+    ) {
+        manager.getGlanceIds(clazz).forEach { id ->
             val state = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
             val appWidgetId = runCatching { manager.getAppWidgetId(id) }.getOrNull()
             val pinned = state[WIDGET_FLIGHT_ID] ?: appWidgetId?.let { WidgetPins.get(context, it) }

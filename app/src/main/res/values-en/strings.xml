@@ -209,6 +209,8 @@
     <string name="push_object_air_title">%1$s airborne</string>
     <string name="push_object_land_title">%1$s landed</string>
     <string name="push_object_squawk_title">%1$s · Squawk %2$s</string>
+    <string name="widget_label_4x2">FlightBuddy 4×2</string>
+    <string name="widget_label_5x2">FlightBuddy 5×2</string>
     <string name="widget_description">Tracked flight with airline logo and status</string>
     <string name="widget_empty">No flights</string>
     <string name="widget_progress">%1$d %%</string>

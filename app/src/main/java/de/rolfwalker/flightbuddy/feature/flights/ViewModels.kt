@@ -6,6 +6,8 @@ import de.rolfwalker.flightbuddy.core.data.FlightRepository
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
 import de.rolfwalker.flightbuddy.core.data.prefs.UserPrefs
+import de.rolfwalker.flightbuddy.core.domain.LogbookStats
+import de.rolfwalker.flightbuddy.core.domain.computeLogbookStats
 import de.rolfwalker.flightbuddy.core.domain.connectionBetween
 import de.rolfwalker.flightbuddy.core.domain.isLiveStatus
 import de.rolfwalker.flightbuddy.core.domain.isPastStatus
@@ -35,6 +37,7 @@ data class HomeState(
     val tab: HomeTab = HomeTab.UPCOMING,
     val connections: Map<String, ConnectionInfo> = emptyMap(),
     val prefs: UserPrefs = UserPrefs(),
+    val stats: LogbookStats = LogbookStats(),
 )
 
 class HomeViewModel(
@@ -58,10 +61,22 @@ class HomeViewModel(
             tab = t,
             connections = connections,
             prefs = p,
+            stats = computeLogbookStats(flights),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeState())
 
     fun setTab(t: HomeTab) { tab.value = t }
+
+    fun setTrackDaily(id: String, daily: Boolean) {
+        viewModelScope.launch {
+            val row = repo.getFlight(id) ?: return@launch
+            repo.updateMeta(id, row.seat, row.notes, row.pushAlerts, daily, if (daily) false else row.inLogbook)
+        }
+    }
+
+    fun deleteFlight(id: String) {
+        viewModelScope.launch { repo.delete(id) }
+    }
 }
 
 fun inferConnections(flights: List<FlightEntity>): Map<String, ConnectionInfo> {
@@ -153,9 +168,11 @@ class FlightDetailViewModel(
     private val id: String,
     private val repo: FlightRepository,
     private val providers: ProviderClients,
+    prefsStore: PrefsStore,
 ) : ViewModel() {
     val flight = repo.observeFlight(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val photo = MutableStateFlow<AircraftPhoto?>(null)
+    val prefs = prefsStore.flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UserPrefs())
 
     init {
         viewModelScope.launch {

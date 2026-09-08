@@ -39,6 +39,7 @@ import de.rolfwalker.flightbuddy.core.model.ThemeMode
 import de.rolfwalker.flightbuddy.core.model.Units
 import de.rolfwalker.flightbuddy.core.ui.TonalCard
 import de.rolfwalker.flightbuddy.feature.map.FlightMapView
+import de.rolfwalker.flightbuddy.feature.map.labelRes
 
 @Composable
 fun SettingsScreen(vm: SettingsViewModel) {
@@ -104,8 +105,18 @@ fun SettingsScreen(vm: SettingsViewModel) {
             }
             Text(stringResource(R.string.settings_language))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = ui.prefs.language == "de", onClick = { vm.updatePrefs { it.copy(language = "de") } }, label = { Text(stringResource(R.string.settings_lang_de)) }, shape = CircleShape)
-                FilterChip(selected = ui.prefs.language == "en", onClick = { vm.updatePrefs { it.copy(language = "en") } }, label = { Text(stringResource(R.string.settings_lang_en)) }, shape = CircleShape)
+                FilterChip(
+                    selected = ui.prefs.language == "de",
+                    onClick = { vm.setLanguage("de") },
+                    label = { Text(stringResource(R.string.settings_lang_de)) },
+                    shape = CircleShape,
+                )
+                FilterChip(
+                    selected = ui.prefs.language == "en",
+                    onClick = { vm.setLanguage("en") },
+                    label = { Text(stringResource(R.string.settings_lang_en)) },
+                    shape = CircleShape,
+                )
             }
             Text(stringResource(R.string.settings_units))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -115,12 +126,12 @@ fun SettingsScreen(vm: SettingsViewModel) {
             Text(stringResource(R.string.settings_map_style))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MapStyleId.entries.take(3).forEach { id ->
-                    FilterChip(selected = ui.prefs.mapStyle == id, onClick = { vm.updatePrefs { it.copy(mapStyle = id) } }, label = { Text(id.name.lowercase()) }, shape = CircleShape)
+                    FilterChip(selected = ui.prefs.mapStyle == id, onClick = { vm.updatePrefs { it.copy(mapStyle = id) } }, label = { Text(stringResource(id.labelRes())) }, shape = CircleShape)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MapStyleId.entries.drop(3).forEach { id ->
-                    FilterChip(selected = ui.prefs.mapStyle == id, onClick = { vm.updatePrefs { it.copy(mapStyle = id) } }, label = { Text(id.name.lowercase()) }, shape = CircleShape)
+                    FilterChip(selected = ui.prefs.mapStyle == id, onClick = { vm.updatePrefs { it.copy(mapStyle = id) } }, label = { Text(stringResource(id.labelRes())) }, shape = CircleShape)
                 }
             }
             TonalCard(Modifier.fillMaxWidth().height(140.dp)) {
@@ -134,7 +145,7 @@ fun SettingsScreen(vm: SettingsViewModel) {
             OutlinedTextField(
                 ui.keys.aeroKey,
                 { v -> vm.updateKeys { it.copy(aeroKey = v) } },
-                label = { Text("AERODATABOX_KEY") },
+                label = { Text(stringResource(R.string.settings_aero_key)) },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -142,7 +153,7 @@ fun SettingsScreen(vm: SettingsViewModel) {
             OutlinedTextField(
                 ui.keys.aeroHost,
                 { v -> vm.updateKeys { it.copy(aeroHost = v) } },
-                label = { Text("AERODATABOX_HOST") },
+                label = { Text(stringResource(R.string.settings_aero_host)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )

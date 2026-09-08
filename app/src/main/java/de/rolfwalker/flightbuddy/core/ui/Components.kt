@@ -8,10 +8,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.MaterialTheme
@@ -39,18 +37,19 @@ fun AirlineLogo(iata: String?, name: String?, size: Int = 40, modifier: Modifier
     val url = airlineLogoUrl(iata)
     val initials = airlineInitials(iata, name)
     val desc = stringResource(R.string.a11y_airline_logo, name ?: iata ?: "?")
-    Surface(
+    Box(
         modifier = modifier.size(size.dp).semantics { contentDescription = desc },
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shadowElevation = 0.dp,
+        contentAlignment = Alignment.Center,
     ) {
         if (url != null) {
-            AsyncImage(model = url, contentDescription = desc, contentScale = ContentScale.Fit, modifier = Modifier.padding(4.dp))
+            AsyncImage(
+                model = url,
+                contentDescription = desc,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(size.dp),
+            )
         } else {
-            Box(contentAlignment = Alignment.Center) {
-                Text(initials, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            }
+            Text(initials, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -62,7 +61,11 @@ fun StatusBadge(status: FlightStatus, delayMinutes: Int? = null) {
         1f, 0.35f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "a",
     )
     val (bg, fg, label) = when (status) {
-        FlightStatus.EN_ROUTE, FlightStatus.DEPARTED -> Triple(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer, stringResource(if (status == FlightStatus.EN_ROUTE) R.string.status_en_route else R.string.status_departed))
+        FlightStatus.EN_ROUTE, FlightStatus.DEPARTED -> Triple(
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+            MaterialTheme.colorScheme.primary,
+            stringResource(if (status == FlightStatus.EN_ROUTE) R.string.status_en_route else R.string.status_departed),
+        )
         FlightStatus.DELAYED -> Triple(Warning.copy(alpha = 0.2f), Warning, if (delayMinutes != null) stringResource(R.string.status_delayed_by, delayMinutes) else stringResource(R.string.status_delayed))
         FlightStatus.CANCELLED, FlightStatus.DIVERTED -> Triple(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, stringResource(if (status == FlightStatus.CANCELLED) R.string.status_cancelled else R.string.status_diverted))
         FlightStatus.LANDED -> Triple(Success.copy(alpha = 0.18f), Success, stringResource(R.string.status_landed))

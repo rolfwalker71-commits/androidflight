@@ -140,7 +140,7 @@ fun AddFlightSheet(onDone: () -> Unit, onCancel: () -> Unit, vm: AddFlightViewMo
                                 listOfNotNull(
                                     "${result.fromIata.orEmpty()}–${result.toIata.orEmpty()}",
                                     result.fromCity,
-                                    result.scheduledDep?.let { DateTimeFmt.dateTime(it, DateTimeFmt.airportZone(result.fromTimezone)) },
+                                    result.scheduledDep?.let { DateTimeFmt.dateTime(it, DateTimeFmt.deviceZone()) },
                                 ).joinToString(" · "),
                             )
                         }

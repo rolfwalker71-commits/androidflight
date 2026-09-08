@@ -1,6 +1,8 @@
 package de.rolfwalker.flightbuddy
 
 import android.app.Application
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import de.rolfwalker.flightbuddy.core.data.AirportSeeder
 import de.rolfwalker.flightbuddy.core.data.prefs.KeysStore
 import de.rolfwalker.flightbuddy.di.appModule
@@ -13,12 +15,19 @@ import kotlinx.coroutines.launch
 import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
+import org.maplibre.android.MapLibre
 
 class FlightBuddyApp : Application() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
+        if (AppCompatDelegate.getApplicationLocales().isEmpty) {
+            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("de"))
+        }
+        // One-arg init uses WellKnownTileServer.MapLibre (no key). The two-arg
+        // overload defaults to MapTiler and shows an API-key prompt.
+        MapLibre.getInstance(this)
         startKoin {
             androidContext(this@FlightBuddyApp)
             modules(appModule)

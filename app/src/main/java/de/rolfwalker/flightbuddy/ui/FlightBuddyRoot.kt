@@ -1,10 +1,25 @@
 package de.rolfwalker.flightbuddy.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Book
@@ -15,11 +30,11 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
@@ -28,7 +43,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -82,6 +99,7 @@ fun FlightBuddyRoot(tablet: Boolean, openFlightId: String?, openAlerts: Boolean)
     val homeVm: HomeViewModel = koinViewModel()
     val homeState by homeVm.state.collectAsState()
     val unread = homeState.unread
+    val showDock = !tablet && route?.startsWith("flight/") != true && route != "add"
 
     LaunchedEffect(openFlightId, openAlerts) {
         if (openFlightId != null) nav.navigate("flight/$openFlightId")
@@ -89,27 +107,24 @@ fun FlightBuddyRoot(tablet: Boolean, openFlightId: String?, openAlerts: Boolean)
     }
 
     Scaffold(
+        contentWindowInsets = if (showDock) {
+            WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
+        } else {
+            WindowInsets.safeDrawing
+        },
         bottomBar = {
-            if (!tablet && route?.startsWith("flight/") != true && route != "add") {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp) {
-                    items.forEach { dest ->
-                        val selected = back?.destination?.hierarchy?.any { it.route == dest.route } == true
-                        val label = stringResource(dest.label)
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = {
-                                nav.navigate(dest.route) {
-                                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = { Icon(dest.icon, contentDescription = label) },
-                            label = { Text(label) },
-                            modifier = Modifier.semantics { contentDescription = label },
-                        )
-                    }
-                }
+            if (showDock) {
+                CompactDock(
+                    items = items,
+                    selectedRoute = route,
+                    onSelect = { dest ->
+                        nav.navigate(dest.route) {
+                            popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
             }
         },
         floatingActionButton = {
@@ -117,7 +132,10 @@ fun FlightBuddyRoot(tablet: Boolean, openFlightId: String?, openAlerts: Boolean)
                 val addLabel = stringResource(R.string.home_add)
                 FloatingActionButton(
                     onClick = { nav.navigate("add") },
-                    shape = MaterialTheme.shapes.large,
+                    shape = RoundedCornerShape(28.dp),
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp),
                     modifier = Modifier.size(64.dp).semantics { contentDescription = addLabel },
                 ) {
                     Icon(Icons.Outlined.Add, contentDescription = addLabel)
@@ -168,7 +186,7 @@ fun FlightBuddyRoot(tablet: Boolean, openFlightId: String?, openAlerts: Boolean)
                 }
                 composable("logbook") {
                     val vm: LogbookViewModel = koinViewModel()
-                    LogbookScreen(vm)
+                    LogbookScreen(vm, language = homeState.prefs.language, units = homeState.prefs.units)
                 }
                 composable("alerts") {
                     val vm: AlertsViewModel = koinViewModel()
@@ -185,5 +203,58 @@ fun FlightBuddyRoot(tablet: Boolean, openFlightId: String?, openAlerts: Boolean)
                 }
             }
         }
+    }
+}
+
+/** Flush MY3 dock: 56dp items + system nav inset only (no 80dp NavigationBar + double inset). */
+@Composable
+private fun CompactDock(
+    items: List<Dest>,
+    selectedRoute: String?,
+    onSelect: (Dest) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items.forEach { dest ->
+                val selected = selectedRoute == dest.route
+                val label = stringResource(dest.label)
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { onSelect(dest) }
+                        .semantics { contentDescription = label },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(
+                        Modifier
+                            .clip(CircleShape)
+                            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer)
+                            .padding(horizontal = 14.dp, vertical = 3.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            dest.icon,
+                            contentDescription = label,
+                            modifier = Modifier.size(22.dp),
+                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
     }
 }

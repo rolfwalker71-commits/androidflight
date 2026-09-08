@@ -53,6 +53,7 @@ import de.rolfwalker.flightbuddy.core.ui.TonalCard
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory
@@ -62,29 +63,10 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
-fun mapStyleJson(id: MapStyleId): String {
-    val tiles = when (id) {
-        MapStyleId.DARK -> listOf("https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png")
-        MapStyleId.VOYAGER -> listOf("https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png")
-        MapStyleId.POSITRON -> listOf("https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png")
-        MapStyleId.OSM -> listOf("https://a.tile.openstreetmap.org/{z}/{x}/{y}.png")
-        MapStyleId.SATELLITE -> listOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}")
-        MapStyleId.TOPO -> listOf("https://a.tile.opentopomap.org/{z}/{x}/{y}.png")
-    }
-    val attr = when (id) {
-        MapStyleId.SATELLITE -> "Tiles © Esri"
-        MapStyleId.OSM -> "© OpenStreetMap"
-        MapStyleId.TOPO -> "© OpenStreetMap, OpenTopoMap"
-        else -> "© OpenStreetMap © CARTO"
-    }
-    return """{"version":8,"sources":{"basemap":{"type":"raster","tiles":["${tiles[0]}"],"tileSize":256,"attribution":"$attr"}},"layers":[{"id":"basemap","type":"raster","source":"basemap"}]}"""
-}
-
-fun arcColor(id: MapStyleId) = when (id) {
-    MapStyleId.DARK, MapStyleId.SATELLITE -> "#3DDCFF"
-    MapStyleId.VOYAGER -> "#0284c7"
-    MapStyleId.TOPO -> "#0f766e"
-    else -> "#0369a1"
+private class FlightMapState {
+    var styleId: MapStyleId? = null
+    var idleBound: Boolean = false
+    var onViewport: ((Double, Double, Double, Double) -> Unit)? = null
 }
 
 @Composable
@@ -97,23 +79,27 @@ fun FlightMapView(
     onViewport: ((Double, Double, Double, Double) -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    remember { MapLibre.getInstance(context) }
+    remember { MapLibre.getInstance(context.applicationContext) }
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
             MapView(ctx).apply {
+                tag = FlightMapState()
                 onCreate(null)
+                onStart()
+                onResume()
                 getMapAsync { map ->
-                    map.setStyle(org.maplibre.android.maps.Style.Builder().fromJson(mapStyleJson(style))) { loaded ->
-                        drawFlights(loaded, flights, style)
-                    }
+                    map.uiSettings.isAttributionEnabled = true
+                    map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(50.0, 10.0), 3.5))
+                    applyBasemap(map, this, style, flights)
                 }
             }
         },
         update = { view ->
+            val state = view.mapState()
+            state.onViewport = onViewport
             view.getMapAsync { map ->
-                val loaded = map.style
-                if (loaded != null) drawFlights(loaded, flights, style)
+                applyBasemap(map, view, style, flights)
                 val follow = flights.find { it.id == followId }
                 val pos = follow?.let {
                     interpolateAirbornePosition(
@@ -125,13 +111,41 @@ fun FlightMapView(
                 if (pos != null) {
                     map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(pos.lat, pos.lon), 6.0))
                 }
-                map.addOnCameraIdleListener {
-                    val b = map.projection.visibleRegion.latLngBounds
-                    onViewport?.invoke(b.latitudeSouth, b.latitudeNorth, b.longitudeWest, b.longitudeEast)
+                if (!state.idleBound) {
+                    state.idleBound = true
+                    map.addOnCameraIdleListener {
+                        val b = map.projection.visibleRegion.latLngBounds
+                        state.onViewport?.invoke(b.latitudeSouth, b.latitudeNorth, b.longitudeWest, b.longitudeEast)
+                    }
                 }
             }
         },
+        onRelease = { view ->
+            view.onPause()
+            view.onStop()
+            view.onDestroy()
+        },
     )
+}
+
+private fun MapView.mapState(): FlightMapState =
+    (tag as? FlightMapState) ?: FlightMapState().also { tag = it }
+
+private fun applyBasemap(
+    map: MapLibreMap,
+    view: MapView,
+    styleId: MapStyleId,
+    flights: List<FlightEntity>,
+) {
+    val state = view.mapState()
+    if (state.styleId != styleId) {
+        state.styleId = styleId
+        map.setStyle(mapLibreStyleBuilder(styleId)) { loaded ->
+            if (state.styleId == styleId) drawFlights(loaded, flights, styleId)
+        }
+    } else {
+        map.style?.let { drawFlights(it, flights, styleId) }
+    }
 }
 
 private fun drawFlights(style: org.maplibre.android.maps.Style, flights: List<FlightEntity>, mapStyle: MapStyleId) {
@@ -154,10 +168,10 @@ private fun drawFlights(style: org.maplibre.android.maps.Style, flights: List<Fl
 }
 
 @Composable
-fun HomeHeroMap(flights: List<FlightEntity>, onOpen: (String) -> Unit) {
+fun HomeHeroMap(flights: List<FlightEntity>, mapStyle: MapStyleId, onOpen: (String) -> Unit) {
     TonalCard(Modifier.fillMaxSize()) {
         Column {
-            FlightMapView(flights, flights.firstOrNull()?.id, emptyList(), MapStyleId.DARK, Modifier.weight(1f))
+            FlightMapView(flights, flights.firstOrNull()?.id, emptyList(), mapStyle, Modifier.weight(1f))
             LazyColumn(Modifier.height(160.dp).padding(8.dp)) {
                 items(flights) { f ->
                     Text(displayFlightNumber(f.flightNumber), modifier = Modifier.clickable { onOpen(f.id) }.padding(8.dp))
@@ -183,7 +197,7 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
                             Column(Modifier.padding(start = 8.dp).weight(1f)) {
                                 Text(displayFlightNumber(f.flightNumber))
                                 Text(
-                                    "${f.fromIata}–${f.toIata} · ${DateTimeFmt.dateTime(f.scheduledDep, DateTimeFmt.airportZone(f.fromTimezone))}",
+                                    "${f.fromIata}–${f.toIata} · ${DateTimeFmt.dateTime(f.scheduledDep, DateTimeFmt.deviceZone())}",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
@@ -219,7 +233,7 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
                         Column(Modifier.padding(start = 12.dp)) {
                             Text(displayFlightNumber(selected.flightNumber), style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "${selected.fromIata}–${selected.toIata} · ${DateTimeFmt.dateTime(selected.scheduledDep, DateTimeFmt.airportZone(selected.fromTimezone))}",
+                                "${selected.fromIata}–${selected.toIata} · ${DateTimeFmt.dateTime(selected.scheduledDep, DateTimeFmt.deviceZone())}",
                             )
                         }
                     }
@@ -231,7 +245,7 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
                 Text(displayFlightNumber(selected.flightNumber), style = MaterialTheme.typography.headlineSmall)
                 StatusBadge(selected.status, selected.delayMinutes)
                 Text("${selected.fromCity} → ${selected.toCity}")
-                Text(DateTimeFmt.dateTime(selected.scheduledDep, DateTimeFmt.airportZone(selected.fromTimezone)))
+                Text(DateTimeFmt.dateTime(selected.scheduledDep, DateTimeFmt.deviceZone()))
             }
         }
     }

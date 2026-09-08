@@ -9,13 +9,14 @@ import androidx.datastore.preferences.preferencesDataStore
 import de.rolfwalker.flightbuddy.core.model.MapStyleId
 import de.rolfwalker.flightbuddy.core.model.ThemeMode
 import de.rolfwalker.flightbuddy.core.model.Units
+import de.rolfwalker.flightbuddy.core.normalizeAppLanguage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore("flightbuddy_prefs")
 
 data class UserPrefs(
-    val theme: ThemeMode = ThemeMode.SYSTEM,
+    val theme: ThemeMode = ThemeMode.DARK,
     val language: String = "de",
     val units: Units = Units.METRIC,
     val mapStyle: MapStyleId = MapStyleId.DARK,
@@ -51,7 +52,7 @@ class PrefsStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             val next = transform(prefs.toPrefs())
             prefs[Keys.theme] = next.theme.name
-            prefs[Keys.language] = next.language
+            prefs[Keys.language] = normalizeAppLanguage(next.language)
             prefs[Keys.units] = next.units.name
             prefs[Keys.mapStyle] = next.mapStyle.name
             prefs[Keys.gate] = next.gateChanges
@@ -66,8 +67,8 @@ class PrefsStore(private val context: Context) {
     }
 
     private fun Preferences.toPrefs() = UserPrefs(
-        theme = runCatching { ThemeMode.valueOf(this[Keys.theme] ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM),
-        language = this[Keys.language] ?: "de",
+        theme = runCatching { ThemeMode.valueOf(this[Keys.theme] ?: "DARK") }.getOrDefault(ThemeMode.DARK),
+        language = normalizeAppLanguage(this[Keys.language]),
         units = runCatching { Units.valueOf(this[Keys.units] ?: "METRIC") }.getOrDefault(Units.METRIC),
         mapStyle = runCatching { MapStyleId.valueOf(this[Keys.mapStyle] ?: "DARK") }.getOrDefault(MapStyleId.DARK),
         gateChanges = this[Keys.gate] ?: true,

@@ -17,11 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import de.rolfwalker.flightbuddy.R
+import de.rolfwalker.flightbuddy.core.model.Units
 import de.rolfwalker.flightbuddy.core.ui.TonalCard
+import de.rolfwalker.flightbuddy.core.ui.formatDistanceMiles
 import java.time.LocalDate
 
 @Composable
-fun LogbookScreen(vm: LogbookViewModel) {
+fun LogbookScreen(vm: LogbookViewModel, language: String = "de", units: Units = Units.METRIC) {
     val (year, stats) = vm.state.collectAsState().value
     val thisYear = LocalDate.now().year
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -40,7 +42,7 @@ fun LogbookScreen(vm: LogbookViewModel) {
                 Stat(stringResource(R.string.logbook_airtime), "${stats.minutes / 60}h ${stats.minutes % 60}m", Modifier.weight(1f))
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Stat(stringResource(R.string.logbook_distance), "${stats.miles.toInt()} mi", Modifier.weight(1f))
+                Stat(stringResource(R.string.logbook_distance), formatDistanceMiles(stats.miles, language, units), Modifier.weight(1f))
                 Stat(stringResource(R.string.logbook_countries), stats.countries.toString(), Modifier.weight(1f))
             }
             TonalCard(Modifier.fillMaxWidth()) {

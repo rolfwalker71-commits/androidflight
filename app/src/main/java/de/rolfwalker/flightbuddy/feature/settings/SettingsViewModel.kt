@@ -8,6 +8,7 @@ import de.rolfwalker.flightbuddy.core.data.prefs.ApiKeys
 import de.rolfwalker.flightbuddy.core.data.prefs.KeysStore
 import de.rolfwalker.flightbuddy.core.data.prefs.redactProviderError
 import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
+import de.rolfwalker.flightbuddy.core.applyAppLanguage
 import de.rolfwalker.flightbuddy.core.data.prefs.UserPrefs
 import de.rolfwalker.flightbuddy.core.model.ProviderStatus
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
@@ -72,6 +73,13 @@ class SettingsViewModel(
 
     fun updatePrefs(block: (UserPrefs) -> UserPrefs) {
         viewModelScope.launch { prefsStore.update(block) }
+    }
+
+    fun setLanguage(tag: String) {
+        viewModelScope.launch {
+            prefsStore.update { it.copy(language = tag) }
+            applyAppLanguage(tag)
+        }
     }
 
     fun updateKeys(block: (ApiKeys) -> ApiKeys) {

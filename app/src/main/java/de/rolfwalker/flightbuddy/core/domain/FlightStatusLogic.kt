@@ -222,6 +222,14 @@ fun airlineLogoUrl(iata: String?): String? {
     return "https://pics.avs.io/200/200/$code.png"
 }
 
+/** IATA for pics.avs.io — stored code, else 2-letter prefix of the flight number. */
+fun airlineCodeForLogo(iata: String?, flightNumber: String?): String? {
+    val fromIata = iata?.trim()?.uppercase().orEmpty()
+    if (fromIata.length in 2..3) return fromIata
+    val number = flightNumber?.trim()?.uppercase().orEmpty()
+    return Regex("^([A-Z]{2})\\d").find(number)?.groupValues?.get(1)
+}
+
 fun airlineInitials(iata: String?, name: String?): String {
     val code = iata?.trim()?.uppercase().orEmpty()
     if (code.length >= 2) return code.take(2)

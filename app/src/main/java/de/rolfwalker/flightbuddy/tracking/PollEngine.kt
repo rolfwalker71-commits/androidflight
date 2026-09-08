@@ -20,7 +20,9 @@ import de.rolfwalker.flightbuddy.core.domain.hasActuallyArrived
 import de.rolfwalker.flightbuddy.core.domain.haversineNm
 import de.rolfwalker.flightbuddy.core.domain.isAirborneTelemetry
 import de.rolfwalker.flightbuddy.core.domain.interpolateAirbornePosition
+import de.rolfwalker.flightbuddy.core.domain.AIRBORNE_HOT_MS
 import de.rolfwalker.flightbuddy.core.domain.intervalForFlight
+import de.rolfwalker.flightbuddy.core.domain.isHotPollWindow
 import de.rolfwalker.flightbuddy.core.domain.isEmergencySquawk
 import de.rolfwalker.flightbuddy.core.domain.isTerminalStatus
 import de.rolfwalker.flightbuddy.core.domain.mergeAeroFlightStatus
@@ -158,7 +160,9 @@ class PollEngine(
             }
         }
 
-        val airborne = resolvePollPhase(next.toPollInput()) == PollPhase.AIRBORNE
+        val pollInput = next.toPollInput()
+        val airborne = resolvePollPhase(pollInput) == PollPhase.AIRBORNE
+        val hotWindow = isHotPollWindow(pollInput)
         var gotFix = false
         if (airborne) {
             val signs = liveCallsignCandidates(next.flightNumber, next.callsign, next.airlineIcao, next.airlineIata)
@@ -170,7 +174,7 @@ class PollEngine(
             val boxLat = next.lastLat ?: guess?.lat
             val boxLon = next.lastLon ?: guess?.lon
             val states = if (!next.icao24.isNullOrBlank()) {
-                providers.fetchOpenSky(keys, icao24 = next.icao24, ignoreInterval = forceLive)
+                providers.fetchOpenSky(keys, icao24 = next.icao24, ignoreInterval = forceLive || hotWindow)
             } else if (boxLat != null && boxLon != null) {
                 providers.fetchOpenSky(
                     keys,
@@ -178,7 +182,7 @@ class PollEngine(
                     lamax = (boxLat + 6.0).coerceAtMost(90.0),
                     lomin = (boxLon - 6.0).coerceAtLeast(-180.0),
                     lomax = (boxLon + 6.0).coerceAtMost(180.0),
-                    ignoreInterval = forceLive,
+                    ignoreInterval = forceLive || hotWindow,
                 )
             } else {
                 emptyList()
@@ -475,12 +479,18 @@ class PollEngine(
         val actives = repo.listFlights().filter { !isTerminalStatus(it.status) }
         if (actives.isEmpty()) return if (repo.listObjects().isEmpty()) 15 * 60_000L else 90_000L
         val next = actives.minOf { it.nextPollAt ?: now }
-        val hot = actives.any {
+        val liveHot = actives.any { isHotPollWindow(it.toPollInput(), now) }
+        val hot = liveHot || actives.any {
             val phase = resolvePollPhase(it.toPollInput())
             phase == PollPhase.AIRBORNE || phase == PollPhase.PREFLIGHT ||
                 it.scheduledDep - now <= PREFLIGHT_WINDOW_MS
         }
-        val wait = (next - now).coerceAtLeast(if (hot) 10_000L else 60_000L)
+        val floor = when {
+            liveHot -> AIRBORNE_HOT_MS
+            hot -> 10_000L
+            else -> 60_000L
+        }
+        val wait = (next - now).coerceAtLeast(floor)
         return wait.coerceAtMost(if (hot) 3 * 60_000L else 30 * 60_000L)
     }
 }

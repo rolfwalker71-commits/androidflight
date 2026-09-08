@@ -280,7 +280,7 @@ private const val CLIMB_EDGE_WINDOW_MS = 20L * 60 * 1000
 private const val APPROACH_HOT_WINDOW_MS = 10L * 60 * 1000
 private const val APPROACH_EDGE_WINDOW_MS = 20L * 60 * 1000
 private const val CRUISE_MS = 3L * 60 * 1000
-private const val AIRBORNE_HOT_MS = 10_000L
+const val AIRBORNE_HOT_MS = 5_000L
 private const val AIRBORNE_EDGE_MS = 30_000L
 const val PREFLIGHT_WINDOW_MS = 2L * 60 * 60 * 1000
 const val LIVE_FIX_STALE_MS = 3L * 60 * 1000
@@ -316,6 +316,10 @@ fun intervalForFlight(input: PollInput, now: Long = System.currentTimeMillis()):
         }
     }
 }
+
+/** Climb after takeoff and the last 10 minutes before landing. */
+fun isHotPollWindow(input: PollInput, now: Long = System.currentTimeMillis()): Boolean =
+    resolvePollPhase(input, now) == PollPhase.AIRBORNE && airborneTier(input, now) == AirborneTier.HOT
 
 private fun airborneTier(flight: PollInput, now: Long): AirborneTier {
     val origin = flight.origin

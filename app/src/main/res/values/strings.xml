@@ -263,6 +263,7 @@
     <string name="flight_source_fr24">Quelle · FlightRadar24</string>
     <string name="flight_source_aero">Quelle · Flugplan</string>
     <string name="flight_source_estimate">Quelle · Schätzung</string>
+    <string name="flight_source_ground">Quelle · noch am Boden</string>
     <string name="flight_source_none">Quelle · unbekannt</string>
     <string name="flight_vrate">Steigen</string>
     <string name="flight_climb">Steigflug</string>

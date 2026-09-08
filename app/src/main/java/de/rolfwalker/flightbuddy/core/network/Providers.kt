@@ -720,7 +720,7 @@ class ProviderClients(
         val since = System.currentTimeMillis() - lastFr24.get()
         if (!ignoreInterval && lastFr24.get() != 0L && since < min) return null
         lastFr24.set(System.currentTimeMillis())
-        val flights = paddedIataFlightNumbers(flightNumber).joinToString(",").ifBlank { null }
+        val flights = paddedIataFlightNumbers(flightNumber).take(2).joinToString(",").ifBlank { null }
         val signs = callsign?.split(',')
             ?.map { compactCallsign(it) }
             ?.filter { it.isNotBlank() && callsignPrefix(it)?.length == 3 }
@@ -729,9 +729,14 @@ class ProviderClients(
             ?.ifBlank { null }
         val reg = registration?.uppercase()?.replace(Regex("[\\s-]+"), "")?.ifBlank { null }
         val params = mutableListOf("limit=15")
-        if (flights != null) params += "flights=$flights"
-        if (signs != null) params += "callsigns=$signs"
-        if (reg != null) params += "registrations=$reg"
+        // FR24 ANDs filters. `flights=EK86&callsigns=UAE86` misses `UAE8T`.
+        if (flights != null) {
+            params += "flights=$flights"
+        } else if (signs != null) {
+            params += "callsigns=$signs"
+        } else if (reg != null) {
+            params += "registrations=$reg"
+        }
         val path = when {
             flights != null || signs != null || reg != null ->
                 "/api/live/flight-positions/full?${params.joinToString("&")}"
@@ -778,15 +783,17 @@ class ProviderClients(
                 val rlat = row.optDouble("lat", Double.NaN)
                 val rlon = row.optDouble("lon", Double.NaN)
                 if (!rlat.isFinite() || !rlon.isFinite()) return@withContext null
-                val alt = row.optDouble("alt", Double.NaN).takeIf { it.isFinite() }
+                val alt = finite(row.opt("alt"), row.opt("altitude"), row.opt("alt_ft"))
+                val speed = finite(row.opt("gspeed"), row.opt("speed"), row.opt("gs"))
+                val track = finite(row.opt("track"), row.opt("heading"), row.opt("hdg"))
                 LiveFix(
                     lat = rlat,
                     lon = rlon,
                     altitudeFt = alt,
-                    velocityKts = row.optDouble("gspeed", Double.NaN).takeIf { it.isFinite() },
-                    heading = row.optDouble("track", Double.NaN).takeIf { it.isFinite() },
-                    verticalRateFpm = row.optDouble("vspeed", Double.NaN).takeIf { it.isFinite() },
-                    onGround = alt != null && alt <= 0,
+                    velocityKts = speed,
+                    heading = track,
+                    verticalRateFpm = finite(row.opt("vspeed"), row.opt("vrate")),
+                    onGround = row.optBoolean("on_ground", alt != null && alt <= 0),
                     icao24 = row.optString("hex").ifBlank { null }?.lowercase(),
                     callsign = row.optString("callsign").ifBlank { null },
                     squawk = row.opt("squawk")?.toString()?.padStart(4, '0')?.takeIf { it.length == 4 },

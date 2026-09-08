@@ -52,8 +52,11 @@ import de.rolfwalker.flightbuddy.core.domain.arrZone
 import de.rolfwalker.flightbuddy.core.domain.depZone
 import de.rolfwalker.flightbuddy.core.domain.haversineNm
 import de.rolfwalker.flightbuddy.core.domain.interpolateAirbornePosition
+import de.rolfwalker.flightbuddy.core.domain.compactCallsign
+import de.rolfwalker.flightbuddy.core.domain.isAirborneTelemetry
 import de.rolfwalker.flightbuddy.core.domain.isEmergencySquawk
 import de.rolfwalker.flightbuddy.core.domain.isLiveStatus
+import de.rolfwalker.flightbuddy.core.domain.stripFlightZeros
 import de.rolfwalker.flightbuddy.core.domain.observedArrAt
 import de.rolfwalker.flightbuddy.core.domain.observedDepAt
 import de.rolfwalker.flightbuddy.core.ui.status.displayFlightStatus
@@ -88,12 +91,28 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
         if (row.lastLat != null && row.lastLon != null) LatLon(row.lastLat, row.lastLon) else null,
         System.currentTimeMillis(),
     )
-    val progress = flightProgress(origin, dest, interp.position, row.scheduledDep, row.scheduledArr, row.estimatedDep, row.estimatedArr, row.observedDepAt(), row.observedArrAt())
-    val remaining = if (interp.position != null && dest != null) haversineNm(interp.position, dest) else null
+    val shown = displayFlightStatus(row)
+    val flying = isAirborneTelemetry(row.lastAltitudeFt, row.lastVelocityKts, row.lastOnGround)
+    val leftGround = flying
+    val progress = if (leftGround) {
+        flightProgress(origin, dest, interp.position, row.scheduledDep, row.scheduledArr, row.estimatedDep, row.estimatedArr, row.observedDepAt(), row.observedArrAt())
+    } else {
+        0.0
+    }
+    val remaining = when {
+        dest == null -> null
+        !leftGround && origin != null -> haversineNm(origin, dest)
+        interp.position != null -> haversineNm(interp.position, dest)
+        else -> null
+    }
     val language = prefs.language
     val units = prefs.units
-    val aircraft = listOfNotNull(row.aircraftType, row.registration).joinToString(" · ")
-    val shown = displayFlightStatus(row)
+    val radio = row.callsign?.let { cs ->
+        val compact = compactCallsign(cs)
+        val number = compactCallsign(row.flightNumber)
+        if (compact.isNotEmpty() && stripFlightZeros(compact) != stripFlightZeros(number)) compact else null
+    }
+    val aircraft = listOfNotNull(row.aircraftType, row.registration, radio).joinToString(" · ")
     val live = isLiveStatus(shown)
     val gap = if (tablet) 10.dp else 8.dp
 
@@ -260,7 +279,7 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                         columns = if (tablet) 4 else 2,
                     )
                     Spacer(Modifier.height(8.dp))
-                    SourceChip(row.lastStatusSource, interp.estimated)
+                    SourceChip(row.lastStatusSource, interp.estimated, onGround = !leftGround)
 
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

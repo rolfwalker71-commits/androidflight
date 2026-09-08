@@ -12,6 +12,7 @@ import de.rolfwalker.flightbuddy.core.domain.observedDepAt
 import de.rolfwalker.flightbuddy.core.domain.flightProgress
 import de.rolfwalker.flightbuddy.core.domain.haversineNm
 import de.rolfwalker.flightbuddy.core.domain.hasActuallyArrived
+import de.rolfwalker.flightbuddy.core.domain.isAirborneTelemetry
 import de.rolfwalker.flightbuddy.core.domain.resolveDisplayStatus
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.model.LatLon
@@ -225,18 +226,27 @@ fun arrStandLine(context: Context, f: FlightEntity, showBaggage: Boolean): Strin
     return bits.joinToString(" · ").takeIf { it.isNotEmpty() }
 }
 
-fun displayFlightStatus(f: FlightEntity, now: Long = System.currentTimeMillis()): FlightStatus =
-    resolveDisplayStatus(
-        status = f.status,
+fun displayFlightStatus(f: FlightEntity, now: Long = System.currentTimeMillis()): FlightStatus {
+    val flying = isAirborneTelemetry(f.lastAltitudeFt, f.lastVelocityKts, f.lastOnGround)
+    val observed = f.observedDepAt()
+    val status = when {
+        flying -> if (f.status == FlightStatus.DIVERTED) f.status else f.status
+        observed == null && (f.status == FlightStatus.EN_ROUTE || f.status == FlightStatus.DEPARTED) ->
+            FlightStatus.DEPARTED
+        else -> f.status
+    }
+    return resolveDisplayStatus(
+        status = status,
         scheduledDep = f.scheduledDep,
         estimatedDep = f.estimatedDep,
-        actualDep = f.observedDepAt(),
+        actualDep = observed ?: f.lastPositionAt?.takeIf { flying },
         scheduledArr = f.scheduledArr,
         estimatedArr = f.estimatedArr,
         actualArr = f.observedArrAt(),
         delayMinutes = f.delayMinutes,
         now = now,
     )
+}
 
 fun statusClockOrDash(ms: Long?, zone: java.time.ZoneId = DateTimeFmt.deviceZone()): String {
     if (ms == null) return "––"
@@ -320,8 +330,7 @@ fun hasStatusDeparted(
     }
     if (status == FlightStatus.LANDED) return false
     if (actualDep != null && actualDep <= now) return true
-    val dep = actualDep ?: estimatedDep ?: scheduledDep ?: return false
-    return now >= dep
+    return false
 }
 
 fun resolveStatusBar(
@@ -415,10 +424,25 @@ fun flightProgressPercent(f: FlightEntity, now: Long = System.currentTimeMillis(
         now = now,
     )
     val geoRaw = airborneGeoProgress(origin, dest, lastFix, f, now)
-    val airborne = shown == FlightStatus.DEPARTED ||
-        shown == FlightStatus.EN_ROUTE ||
-        shown == FlightStatus.DIVERTED
-    val raw = if (airborne) max(geoRaw ?: 0.0, timeRaw) else timeRaw
+    val flying = isAirborneTelemetry(f.lastAltitudeFt, f.lastVelocityKts, f.lastOnGround)
+    val leftRunway = flying || f.observedDepAt() != null
+    val airborne = leftRunway && (
+        shown == FlightStatus.DEPARTED ||
+            shown == FlightStatus.EN_ROUTE ||
+            shown == FlightStatus.DIVERTED
+        )
+    val raw = if (!leftRunway && (
+            shown == FlightStatus.DEPARTED ||
+                shown == FlightStatus.EN_ROUTE ||
+                shown == FlightStatus.DIVERTED
+            )
+    ) {
+        0.0
+    } else if (airborne) {
+        max(geoRaw ?: 0.0, timeRaw)
+    } else {
+        timeRaw
+    }
     return (raw * 100).toInt().coerceIn(0, 99)
 }
 

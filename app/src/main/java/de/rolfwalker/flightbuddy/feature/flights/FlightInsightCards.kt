@@ -95,11 +95,12 @@ fun FlightOpsCards(row: FlightEntity, units: Units, language: String) {
 }
 
 @Composable
-fun SourceChip(source: String?, estimated: Boolean) {
+fun SourceChip(source: String?, estimated: Boolean, onGround: Boolean = false) {
     val label = when {
-        estimated -> stringResource(R.string.flight_source_estimate)
         source == "opensky" -> stringResource(R.string.flight_source_adsb)
         source == "fr24" -> stringResource(R.string.flight_source_fr24)
+        onGround -> stringResource(R.string.flight_source_ground)
+        estimated -> stringResource(R.string.flight_source_estimate)
         source == "aerodatabox" -> stringResource(R.string.flight_source_aero)
         source.isNullOrBlank() -> stringResource(R.string.flight_source_none)
         else -> source

@@ -263,6 +263,7 @@
     <string name="flight_source_fr24">Source · FlightRadar24</string>
     <string name="flight_source_aero">Source · schedule</string>
     <string name="flight_source_estimate">Source · estimate</string>
+    <string name="flight_source_ground">Source · still on the ground</string>
     <string name="flight_source_none">Source · unknown</string>
     <string name="flight_vrate">Vertical</string>
     <string name="flight_climb">Climbing</string>

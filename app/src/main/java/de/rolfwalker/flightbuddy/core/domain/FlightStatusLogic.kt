@@ -223,9 +223,9 @@ fun resolveDisplayStatus(
     }
     if (status == FlightStatus.DIVERTED) return FlightStatus.DIVERTED
     val dep = effectiveDepartureMs(scheduledDep, estimatedDep, actualDep, delayMinutes)
-    val departed = (actualDep != null && actualDep <= now) || now >= dep
+    val departed = actualDep != null && actualDep <= now
     if (departed) {
-        return if (now - dep < JUST_DEPARTED_MS) FlightStatus.DEPARTED else FlightStatus.EN_ROUTE
+        return if (now - (actualDep ?: dep) < JUST_DEPARTED_MS) FlightStatus.DEPARTED else FlightStatus.EN_ROUTE
     }
     if (status == FlightStatus.GATE_CLOSED) return FlightStatus.GATE_CLOSED
     if (status == FlightStatus.BOARDING) return FlightStatus.BOARDING
@@ -377,6 +377,9 @@ fun interpolateAirbornePosition(
         return Interpolated(lastFix, false)
     }
     if (origin == null || dest == null) return Interpolated(lastFix, lastFix != null)
+    if (flight.actualDep == null) {
+        return Interpolated(origin, true)
+    }
     val start = flight.actualDep ?: flight.estimatedDep ?: flight.scheduledDep
     val end = flight.actualArr ?: flight.estimatedArr ?: flight.scheduledArr ?: (start + 2 * 60 * 60 * 1000)
     val span = (end - start).coerceAtLeast(1)

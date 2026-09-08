@@ -3,6 +3,7 @@ package de.rolfwalker.flightbuddy.core.network
 import de.rolfwalker.flightbuddy.core.data.prefs.ApiKeys
 import de.rolfwalker.flightbuddy.core.data.prefs.sanitizeApiCredential
 import java.net.URI
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** Official AeroDataBox listing on API.Market (not RapidAPI). Same default as FlightBuddy PWA. */
 const val AERO_API_MARKET_HOST = "prod.api.market/api/v1/aedbx/aerodatabox"
@@ -15,14 +16,15 @@ data class AeroEndpoint(
 )
 
 private fun ensureHttps(raw: String): String {
-    val trimmed = raw.trim().trimEnd('/').trimStart('/')
+    val trimmed = raw.trim().trimEnd('/')
     if (trimmed.isBlank()) return AERO_API_MARKET_BASE_URL
     return if (trimmed.startsWith("http://", ignoreCase = true) ||
         trimmed.startsWith("https://", ignoreCase = true)
     ) {
-        trimmed.trimEnd('/')
+        trimmed
     } else {
-        "https://$trimmed"
+        // Same as PWA: only strip leading slashes when the value is host+path, not a URL.
+        "https://${trimmed.trimStart('/')}"
     }
 }
 
@@ -56,7 +58,9 @@ fun resolveAeroEndpoint(baseUrl: String?, host: String?): AeroEndpoint {
 fun joinAeroUrl(baseUrl: String, path: String): String {
     val base = resolveAeroEndpoint(baseUrl, null).aeroBaseUrl.trimEnd('/')
     val suffix = if (path.startsWith("/")) path else "/$path"
-    return base + suffix
+    val joined = base + suffix
+    require(joined.toHttpUrlOrNull() != null) { "invalid AeroDataBox URL" }
+    return joined
 }
 
 fun ApiKeys.aeroEndpointOrNull(): AeroEndpoint? {

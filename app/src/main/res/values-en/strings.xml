@@ -34,6 +34,10 @@
     <string name="flight_api_error">AeroDataBox did not return a schedule.</string>
     <string name="flight_invalid_api_key">API key contains invalid characters (e.g. a line break). Paste the key again in Settings, as a single line.</string>
     <string name="flight_network_error">Could not reach AeroDataBox. Check the network and try again.</string>
+    <string name="flight_timeout">AeroDataBox timed out. Try again.</string>
+    <string name="flight_unknown_host">Could not resolve the AeroDataBox host.</string>
+    <string name="flight_ssl_error">AeroDataBox TLS/SSL failed.</string>
+    <string name="flight_bad_url">AeroDataBox URL is invalid. Check AERODATABOX_HOST / BASE_URL.</string>
     <string name="flight_manual">Enter manually</string>
     <string name="flight_number">Flight number</string>
     <string name="flight_from">From</string>

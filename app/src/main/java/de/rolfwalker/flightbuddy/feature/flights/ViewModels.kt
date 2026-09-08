@@ -14,13 +14,16 @@ import de.rolfwalker.flightbuddy.core.model.ConnectionInfo
 import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
 import de.rolfwalker.flightbuddy.core.model.SearchReason
 import de.rolfwalker.flightbuddy.core.data.prefs.isInvalidApiCredentialException
+import de.rolfwalker.flightbuddy.core.data.prefs.redactProviderError
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
 import de.rolfwalker.flightbuddy.tracking.TrackerController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 enum class HomeTab { UPCOMING, LIVE, PAST }
@@ -99,13 +102,28 @@ class AddFlightViewModel(private val repo: FlightRepository) : ViewModel() {
         viewModelScope.launch {
             update { it.copy(loading = true, error = null, reason = null) }
             try {
-                val out = repo.search(ui.value.query, ui.value.date)
-                update { it.copy(loading = false, results = out.flights, reason = if (out.flights.isEmpty()) out.reason else SearchReason.OK) }
+                val out = withContext(Dispatchers.IO) { repo.search(ui.value.query, ui.value.date) }
+                update {
+                    it.copy(
+                        loading = false,
+                        results = out.flights,
+                        reason = if (out.flights.isEmpty()) out.reason else SearchReason.OK,
+                        error = if (out.flights.isEmpty()) out.detail else null,
+                    )
+                }
             } catch (e: Exception) {
                 if (isInvalidApiCredentialException(e)) {
                     update { it.copy(loading = false, error = null, reason = SearchReason.INVALID_API_KEY) }
                 } else {
-                    update { it.copy(loading = false, error = null, reason = SearchReason.HTTP_ERROR) }
+                    update {
+                        it.copy(
+                            loading = false,
+                            error = redactProviderError(
+                                e.javaClass.simpleName + (e.message?.let { m -> ": $m" } ?: ""),
+                            ),
+                            reason = SearchReason.NETWORK_ERROR,
+                        )
+                    }
                 }
             }
         }

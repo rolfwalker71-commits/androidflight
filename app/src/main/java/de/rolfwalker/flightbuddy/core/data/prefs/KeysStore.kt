@@ -64,12 +64,12 @@ fun isUnsafeHeaderError(message: String?): Boolean {
         m.contains(INVALID_API_CREDENTIAL_CHARS)
 }
 
-fun isInvalidApiCredentialException(e: Throwable): Boolean =
-    e is IllegalArgumentException || isUnsafeHeaderError(e.message)
+fun isInvalidApiCredentialException(e: Throwable): Boolean = isUnsafeHeaderError(e.message)
 
 fun redactProviderError(message: String?): String? {
     if (message.isNullOrBlank()) return null
-    if (isUnsafeHeaderError(message)) return INVALID_API_CREDENTIAL_CHARS
+    // Keep "HTTP 403: invalid x-api-market-key" visible; only hide OkHttp header-construction leaks.
+    if (isUnsafeHeaderError(message) && !message.startsWith("HTTP ")) return INVALID_API_CREDENTIAL_CHARS
     return message
 }
 

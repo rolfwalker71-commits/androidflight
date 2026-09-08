@@ -99,6 +99,10 @@ fun AddFlightSheet(onDone: () -> Unit, onCancel: () -> Unit, vm: AddFlightViewMo
                         SearchReason.INVALID_API_KEY -> R.string.flight_invalid_api_key
                         SearchReason.NETWORK_ERROR -> R.string.flight_network_error
                         SearchReason.HTTP_ERROR -> R.string.flight_api_error
+                        SearchReason.TIMEOUT -> R.string.flight_timeout
+                        SearchReason.UNKNOWN_HOST -> R.string.flight_unknown_host
+                        SearchReason.SSL_ERROR -> R.string.flight_ssl_error
+                        SearchReason.BAD_URL -> R.string.flight_bad_url
                         SearchReason.EMPTY -> R.string.flight_no_results
                         SearchReason.OK -> R.string.flight_no_results
                     },

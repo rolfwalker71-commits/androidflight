@@ -11,20 +11,29 @@ import de.rolfwalker.flightbuddy.core.data.prefs.sanitized
 import de.rolfwalker.flightbuddy.core.domain.mapProviderStatus
 import de.rolfwalker.flightbuddy.core.model.AircraftPhoto
 import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
-import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.model.SearchReason
+import android.os.NetworkOnMainThreadException
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import java.io.InterruptedIOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import javax.net.ssl.SSLException
 
 data class LiveFix(
     val lat: Double,
@@ -44,6 +53,7 @@ data class AeroLookup(
     val flights: List<FlightSearchResult>,
     val reason: SearchReason,
     val httpStatus: Int? = null,
+    val detail: String? = null,
 )
 
 data class TrafficState(
@@ -62,6 +72,8 @@ data class TrafficState(
 class ProviderClients(
     private val logs: ApiLogDao,
 ) {
+    private val aeroLogTag = "FlightBuddy/Aero"
+
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -199,6 +211,35 @@ class ProviderClients(
         return SearchReason.HTTP_ERROR
     }
 
+    private fun httpDetail(status: Int, body: String, fallback: String? = null): String {
+        val snippet = body.replace(Regex("\\s+"), " ").trim().take(160)
+        val tail = snippet.ifBlank { fallback?.trim().orEmpty() }.ifBlank { "no body" }
+        return "HTTP $status: $tail"
+    }
+
+    private fun classifyAeroException(e: Exception): Pair<SearchReason, String> {
+        val raw = redactProviderError(e.message) ?: e.javaClass.simpleName
+        return when {
+            isInvalidApiCredentialException(e) ->
+                SearchReason.INVALID_API_KEY to INVALID_API_CREDENTIAL_CHARS
+            e is SocketTimeoutException || e is InterruptedIOException ->
+                SearchReason.TIMEOUT to "timeout: $raw"
+            e is UnknownHostException ->
+                SearchReason.UNKNOWN_HOST to "unknown host: ${e.message ?: raw}"
+            e is SSLException || e.cause is SSLException ->
+                SearchReason.SSL_ERROR to "ssl: $raw"
+            e is ConnectException ->
+                SearchReason.NETWORK_ERROR to "connect: $raw"
+            e is NetworkOnMainThreadException ->
+                SearchReason.NETWORK_ERROR to "main-thread network"
+            e is JSONException ->
+                SearchReason.HTTP_ERROR to "invalid JSON: $raw"
+            e is IllegalArgumentException && raw.contains("url", ignoreCase = true) ->
+                SearchReason.BAD_URL to "invalid url: $raw"
+            else -> SearchReason.NETWORK_ERROR to "${e.javaClass.simpleName}: $raw"
+        }
+    }
+
     private fun aeroHeaders(key: String, endpoint: AeroEndpoint): Map<String, String> {
         val cleanKey = sanitizeApiCredential(key)
         val cleanHost = sanitizeApiCredential(endpoint.aeroHost)
@@ -263,14 +304,36 @@ class ProviderClients(
         return fetchAeroList(keys, path).flights.firstOrNull()
     }
 
-    private suspend fun fetchAeroList(keys: ApiKeys, path: String): AeroLookup {
+    private suspend fun fetchAeroList(keys: ApiKeys, path: String): AeroLookup = withContext(Dispatchers.IO) {
         val clean = keys.sanitized()
-        val endpoint = clean.aeroEndpointOrNull() ?: return AeroLookup(emptyList(), SearchReason.UNCONFIGURED)
-        val url = joinAeroUrl(endpoint.aeroBaseUrl, path)
-        return try {
-            val req = Request.Builder().url(url).apply {
+        val endpoint = clean.aeroEndpointOrNull()
+            ?: return@withContext AeroLookup(emptyList(), SearchReason.UNCONFIGURED)
+        val url = try {
+            joinAeroUrl(endpoint.aeroBaseUrl, path)
+        } catch (e: Exception) {
+            val detail = "invalid url: ${redactProviderError(e.message) ?: e.javaClass.simpleName}"
+            lastAeroError = detail
+            log("aerodatabox", path, null, false, detail, null)
+            return@withContext AeroLookup(emptyList(), SearchReason.BAD_URL, detail = detail)
+        }
+        // URL only — never log the API key (it lives in headers).
+        Log.i(aeroLogTag, "GET $url")
+        val req = try {
+            Request.Builder().url(url).apply {
                 aeroHeaders(clean.aeroKey, endpoint).forEach { addHeader(it.key, it.value) }
             }.build()
+        } catch (e: Exception) {
+            if (isInvalidApiCredentialException(e)) {
+                lastAeroError = INVALID_API_CREDENTIAL_CHARS
+                log("aerodatabox", url, null, false, lastAeroError, null)
+                return@withContext AeroLookup(emptyList(), SearchReason.INVALID_API_KEY, detail = lastAeroError)
+            }
+            val detail = "invalid request: ${redactProviderError(e.message) ?: e.javaClass.simpleName}"
+            lastAeroError = detail
+            log("aerodatabox", url, null, false, detail, null)
+            return@withContext AeroLookup(emptyList(), SearchReason.BAD_URL, detail = detail)
+        }
+        try {
             http.newCall(req).execute().use { res ->
                 val body = res.body?.string().orEmpty()
                 val remaining = res.header("x-ratelimit-remaining")?.toIntOrNull()
@@ -278,28 +341,37 @@ class ProviderClients(
                 lastAeroRemaining = remaining
                 if (res.code == 204) {
                     lastAeroError = null
-                    log("aerodatabox", path, res.code, true, null, remaining)
-                    return AeroLookup(emptyList(), SearchReason.EMPTY, res.code)
+                    log("aerodatabox", url, res.code, true, null, remaining)
+                    return@withContext AeroLookup(emptyList(), SearchReason.EMPTY, res.code)
                 }
                 if (!res.isSuccessful) {
-                    lastAeroError = redactProviderError("${res.code} ${body.take(180)}")
-                    log("aerodatabox", path, res.code, false, lastAeroError, remaining)
-                    return AeroLookup(emptyList(), classifyAero(res.code, body), res.code)
+                    val detail = httpDetail(res.code, body, res.message)
+                    lastAeroError = redactProviderError(detail)
+                    log("aerodatabox", url, res.code, false, lastAeroError, remaining)
+                    return@withContext AeroLookup(
+                        emptyList(),
+                        classifyAero(res.code, body),
+                        res.code,
+                        lastAeroError,
+                    )
                 }
                 lastAeroError = null
-                log("aerodatabox", path, res.code, true, null, remaining)
-                val rows = rowsFrom(body).map { mapAero(it) }.filter { it.flightNumber.isNotBlank() || it.fromIata != null }
+                log("aerodatabox", url, res.code, true, null, remaining)
+                val rows = try {
+                    rowsFrom(body).map { mapAero(it) }.filter { it.flightNumber.isNotBlank() || it.fromIata != null }
+                } catch (e: JSONException) {
+                    val detail = httpDetail(res.code, body, "invalid JSON")
+                    lastAeroError = detail
+                    log("aerodatabox", url, res.code, false, detail, remaining)
+                    return@withContext AeroLookup(emptyList(), SearchReason.HTTP_ERROR, res.code, detail)
+                }
                 AeroLookup(rows, if (rows.isEmpty()) SearchReason.EMPTY else SearchReason.OK, res.code)
             }
         } catch (e: Exception) {
-            if (isInvalidApiCredentialException(e)) {
-                lastAeroError = INVALID_API_CREDENTIAL_CHARS
-                log("aerodatabox", path, null, false, lastAeroError, null)
-                return AeroLookup(emptyList(), SearchReason.INVALID_API_KEY)
-            }
-            lastAeroError = redactProviderError(e.message)
-            log("aerodatabox", path, null, false, lastAeroError, null)
-            AeroLookup(emptyList(), SearchReason.NETWORK_ERROR)
+            val (reason, detail) = classifyAeroException(e)
+            lastAeroError = detail
+            log("aerodatabox", url, null, false, detail, null)
+            AeroLookup(emptyList(), reason, detail = detail)
         }
     }
 
@@ -336,17 +408,19 @@ class ProviderClients(
             .header("Accept", "application/json")
             .build()
         return try {
+            withContext(Dispatchers.IO) {
             http.newCall(req).execute().use { res ->
                 val text = res.body?.string().orEmpty()
                 if (!res.isSuccessful) {
                     lastOpenSkyError = "token ${res.code}"
-                    return null
+                    return@withContext null
                 }
                 val obj = JSONObject(text)
                 openSkyToken = obj.optString("access_token").ifBlank { null }
                 val ttl = (obj.optInt("expires_in", 1800) - 60).coerceAtLeast(60)
                 openSkyTokenExp = System.currentTimeMillis() + ttl * 1000L
                 openSkyToken
+            }
             }
         } catch (e: Exception) {
             lastOpenSkyError = if (isInvalidApiCredentialException(e)) {
@@ -382,6 +456,7 @@ class ProviderClients(
             val req = Request.Builder().url(qs).header("Accept", "application/json").apply {
                 if (!token.isNullOrBlank()) header("Authorization", "Bearer $token")
             }.build()
+            withContext(Dispatchers.IO) {
             http.newCall(req).execute().use { res ->
                 lastOpenSkyRemaining = res.header("X-Rate-Limit-Remaining")?.toIntOrNull()
                     ?: res.header("x-rate-limit-remaining")?.toIntOrNull()
@@ -389,11 +464,11 @@ class ProviderClients(
                 if (!res.isSuccessful) {
                     lastOpenSkyError = redactProviderError("${res.code} ${body.take(120)}")
                     log("opensky", qs, res.code, false, lastOpenSkyError, lastOpenSkyRemaining)
-                    return emptyList()
+                    return@withContext emptyList()
                 }
                 lastOpenSkyError = null
                 log("opensky", qs, res.code, true, null, lastOpenSkyRemaining)
-                val states = JSONObject(body).optJSONArray("states") ?: return emptyList()
+                val states = JSONObject(body).optJSONArray("states") ?: return@withContext emptyList()
                 (0 until states.length()).mapNotNull { i ->
                     val row = states.optJSONArray(i) ?: return@mapNotNull null
                     val lat = row.optDouble(6, Double.NaN)
@@ -412,6 +487,7 @@ class ProviderClients(
                         country = row.optString(2).ifBlank { null },
                     )
                 }
+            }
             }
         } catch (e: Exception) {
             lastOpenSkyError = if (isInvalidApiCredentialException(e)) {
@@ -455,24 +531,25 @@ class ProviderClients(
                 .header("Accept-Version", "v1")
                 .header("Authorization", "Bearer $token")
                 .build()
+            withContext(Dispatchers.IO) {
             http.newCall(req).execute().use { res ->
                 val body = res.body?.string().orEmpty()
                 lastFr24Remaining = res.header("x-rate-limit-remaining")?.toIntOrNull()
                 if (!res.isSuccessful) {
                     lastFr24Error = redactProviderError("${res.code} ${body.take(120)}")
                     log("fr24", path, res.code, false, lastFr24Error, lastFr24Remaining)
-                    return null
+                    return@withContext null
                 }
                 lastFr24Error = null
                 log("fr24", path, res.code, true, null, lastFr24Remaining)
                 val root = if (body.trim().startsWith("[")) JSONArray(body) else JSONObject(body).optJSONArray("data") ?: JSONArray()
-                if (root.length() == 0) return null
+                if (root.length() == 0) return@withContext null
                 val row = (0 until root.length()).map { root.getJSONObject(it) }.firstOrNull { obj ->
                     icao24 == null || obj.optString("hex").equals(icao24, true)
                 } ?: root.getJSONObject(0)
                 val rlat = row.optDouble("lat", Double.NaN)
                 val rlon = row.optDouble("lon", Double.NaN)
-                if (!rlat.isFinite() || !rlon.isFinite()) return null
+                if (!rlat.isFinite() || !rlon.isFinite()) return@withContext null
                 val alt = row.optDouble("alt", Double.NaN).takeIf { it.isFinite() }
                 LiveFix(
                     lat = rlat,
@@ -485,6 +562,7 @@ class ProviderClients(
                     callsign = row.optString("callsign").ifBlank { null },
                     source = "fr24",
                 )
+            }
             }
         } catch (e: Exception) {
             lastFr24Error = if (isInvalidApiCredentialException(e)) {
@@ -503,19 +581,21 @@ class ProviderClients(
             .header("User-Agent", "FlightBuddy/1.0")
             .build()
         return try {
+            withContext(Dispatchers.IO) {
             http.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) return null
-                val photos = JSONObject(res.body?.string().orEmpty()).optJSONArray("photos") ?: return null
-                if (photos.length() == 0) return null
+                if (!res.isSuccessful) return@withContext null
+                val photos = JSONObject(res.body?.string().orEmpty()).optJSONArray("photos") ?: return@withContext null
+                if (photos.length() == 0) return@withContext null
                 val p = photos.getJSONObject(0)
                 val thumb = p.optJSONObject("thumbnail_large") ?: p.optJSONObject("thumbnail")
-                val src = thumb?.optString("src")?.ifBlank { null } ?: return null
+                val src = thumb?.optString("src")?.ifBlank { null } ?: return@withContext null
                 AircraftPhoto(
                     url = src,
                     webUrl = p.optString("link").ifBlank { null },
                     photographer = p.optString("photographer").ifBlank { null },
                     source = "Planespotters.net",
                 )
+            }
             }
         } catch (_: Exception) {
             null

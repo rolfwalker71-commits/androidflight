@@ -34,6 +34,10 @@
     <string name="flight_api_error">AeroDataBox hat den Flugplan nicht geliefert.</string>
     <string name="flight_invalid_api_key">API-Key enthält ungültige Zeichen (z. B. Zeilenumbruch). Key in den Einstellungen neu einfügen, ohne Leerzeile.</string>
     <string name="flight_network_error">Keine Verbindung zu AeroDataBox. Netz prüfen und erneut suchen.</string>
+    <string name="flight_timeout">AeroDataBox hat nicht rechtzeitig geantwortet. Bitte erneut suchen.</string>
+    <string name="flight_unknown_host">AeroDataBox-Host konnte nicht aufgelöst werden.</string>
+    <string name="flight_ssl_error">AeroDataBox TLS/SSL ist fehlgeschlagen.</string>
+    <string name="flight_bad_url">AeroDataBox-URL ist ungültig. AERODATABOX_HOST / BASE_URL prüfen.</string>
     <string name="flight_manual">Manuell eintragen</string>
     <string name="flight_number">Flugnummer</string>
     <string name="flight_from">Von</string>

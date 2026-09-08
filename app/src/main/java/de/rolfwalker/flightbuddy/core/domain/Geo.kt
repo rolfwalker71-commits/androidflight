@@ -71,6 +71,17 @@ fun flightProgress(
     return ((now - start).toDouble() / span).coerceIn(0.0, 0.98)
 }
 
+/** Geographic heading in degrees [0, 360) from [from] to [to]. */
+fun initialBearing(from: LatLon, to: LatLon): Double {
+    val φ1 = toRad(from.lat)
+    val φ2 = toRad(to.lat)
+    val Δλ = toRad(to.lon - from.lon)
+    val y = sin(Δλ) * cos(φ2)
+    val x = cos(φ1) * sin(φ2) - sin(φ1) * cos(φ2) * cos(Δλ)
+    val deg = toDeg(atan2(y, x))
+    return (deg + 360.0) % 360.0
+}
+
 fun destinationPoint(start: LatLon, headingDeg: Double, distanceNm: Double): LatLon {
     if (!distanceNm.isFinite() || distanceNm == 0.0) return start
     val δ = distanceNm / NM_EARTH

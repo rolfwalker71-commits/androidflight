@@ -16,6 +16,7 @@ import de.rolfwalker.flightbuddy.core.ui.status.displayFlightStatus
 import de.rolfwalker.flightbuddy.core.model.AircraftPhoto
 import de.rolfwalker.flightbuddy.core.model.ConnectionInfo
 import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
+import de.rolfwalker.flightbuddy.core.model.LatLon
 import de.rolfwalker.flightbuddy.core.model.SearchReason
 import de.rolfwalker.flightbuddy.core.data.prefs.isInvalidApiCredentialException
 import de.rolfwalker.flightbuddy.core.data.prefs.redactProviderError
@@ -25,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -182,6 +184,9 @@ class FlightDetailViewModel(
     val flight = repo.observeFlight(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val photo = MutableStateFlow<AircraftPhoto?>(null)
     val prefs = prefsStore.flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UserPrefs())
+    val track = repo.observePositions(id)
+        .map { rows -> rows.map { LatLon(it.lat, it.lon) } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch {

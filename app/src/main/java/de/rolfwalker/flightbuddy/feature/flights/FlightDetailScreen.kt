@@ -67,6 +67,7 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
     val flight by vm.flight.collectAsState()
     val photo by vm.photo.collectAsState()
     val prefs by vm.prefs.collectAsState()
+    val track by vm.track.collectAsState()
     var confirm by remember { mutableStateOf(false) }
     val row = flight ?: return
     var seat by remember(row.id, row.seat) { mutableStateOf(row.seat.orEmpty()) }
@@ -112,7 +113,15 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
             verticalArrangement = Arrangement.spacedBy(gap),
         ) {
             TonalCard(Modifier.fillMaxWidth().height(if (tablet) 280.dp else 208.dp)) {
-                FlightMapView(listOf(row), followId = row.id, traffic = emptyList(), style = prefs.mapStyle, modifier = Modifier.fillMaxSize())
+                FlightMapView(
+                    flights = listOf(row),
+                    followId = null,
+                    traffic = emptyList(),
+                    style = prefs.mapStyle,
+                    modifier = Modifier.fillMaxSize(),
+                    tracks = mapOf(row.id to track),
+                    frameFlightId = row.id,
+                )
             }
             TonalCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(if (tablet) 16.dp else 14.dp)) {

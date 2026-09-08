@@ -52,6 +52,12 @@ interface PositionDao {
     @Query("SELECT * FROM positions WHERE flightId = :flightId ORDER BY recordedAt DESC LIMIT :limit")
     suspend fun recent(flightId: String, limit: Int = 200): List<PositionEntity>
 
+    @Query("SELECT * FROM positions WHERE flightId = :flightId ORDER BY recordedAt ASC")
+    fun observeForFlight(flightId: String): Flow<List<PositionEntity>>
+
+    @Query("SELECT * FROM positions ORDER BY recordedAt ASC")
+    fun observeAll(): Flow<List<PositionEntity>>
+
     @Query("DELETE FROM positions WHERE flightId = :flightId")
     suspend fun deleteForFlight(flightId: String)
 }

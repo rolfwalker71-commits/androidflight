@@ -110,6 +110,8 @@
     <string name="map_locate">My location</string>
     <string name="map_follow">Follow aircraft</string>
     <string name="map_viewport_traffic">Viewport traffic</string>
+    <string name="map_viewport_traffic_zoom">Zoom in — large excerpts are skipped</string>
+    <string name="map_viewport_traffic_live">%1$d aircraft in view</string>
     <string name="map_objects">Objects</string>
     <string name="map_objects_empty">No saved objects.</string>
     <string name="map_object_hint">Notify on each start — e.g. REGA RGA08.</string>

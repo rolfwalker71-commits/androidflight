@@ -110,6 +110,8 @@
     <string name="map_locate">Standort</string>
     <string name="map_follow">Flugzeug folgen</string>
     <string name="map_viewport_traffic">Verkehr im Ausschnitt</string>
+    <string name="map_viewport_traffic_zoom">Näher heranzoomen — große Ausschnitte überspringen wir</string>
+    <string name="map_viewport_traffic_live">%1$d Flugzeuge im Ausschnitt</string>
     <string name="map_objects">Objekte</string>
     <string name="map_objects_empty">Keine gespeicherten Objekte.</string>
     <string name="map_object_hint">Meldung bei jedem Start — z. B. REGA RGA08.</string>

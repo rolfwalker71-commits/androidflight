@@ -83,6 +83,7 @@ class ProviderClients(
     private var openSkyToken: String? = null
     private var openSkyTokenExp = 0L
     private val lastOpenSky = AtomicLong(0)
+    private val lastOpenSkyBbox = AtomicLong(0)
     private val lastFr24 = AtomicLong(0)
     private val lastAero = AtomicLong(0)
     @Volatile var lastOpenSkyError: String? = null
@@ -441,11 +442,14 @@ class ProviderClients(
         lamax: Double? = null,
         lomin: Double? = null,
         lomax: Double? = null,
+        ignoreInterval: Boolean = false,
     ): List<TrafficState> {
         val min = keys.openSkyMinIntervalMs.toLong().coerceAtLeast(90_000)
         val since = System.currentTimeMillis() - lastOpenSky.get()
-        if (lastOpenSky.get() != 0L && since < min) return emptyList()
-        lastOpenSky.set(System.currentTimeMillis())
+        if (!ignoreInterval) {
+            if (lastOpenSky.get() != 0L && since < min) return emptyList()
+            lastOpenSky.set(System.currentTimeMillis())
+        }
         val qs = buildString {
             append("https://opensky-network.org/api/states/all")
             val parts = mutableListOf<String>()
@@ -500,6 +504,32 @@ class ProviderClients(
             log("opensky", qs, null, false, lastOpenSkyError, null)
             emptyList()
         }
+    }
+
+    /**
+     * Viewport traffic. Own interval so the tracker’s icao24 polls do not
+     * silently swallow map updates (that used to return an empty list).
+     * `null` means throttled — keep the last drawn aircraft.
+     */
+    suspend fun fetchOpenSkyBbox(
+        keys: ApiKeys,
+        lamin: Double,
+        lamax: Double,
+        lomin: Double,
+        lomax: Double,
+    ): List<TrafficState>? {
+        val min = keys.openSkyMinIntervalMs.toLong().coerceAtLeast(90_000)
+        val since = System.currentTimeMillis() - lastOpenSkyBbox.get()
+        if (lastOpenSkyBbox.get() != 0L && since < min) return null
+        lastOpenSkyBbox.set(System.currentTimeMillis())
+        return fetchOpenSky(
+            keys,
+            lamin = lamin,
+            lamax = lamax,
+            lomin = lomin,
+            lomax = lomax,
+            ignoreInterval = true,
+        )
     }
 
     suspend fun fetchFr24(keys: ApiKeys, flightNumber: String?, callsign: String?, icao24: String?, lat: Double?, lon: Double?): LiveFix? {

@@ -41,6 +41,8 @@ class FlightRepository(
     fun observeAlerts(): Flow<List<AlertEntity>> = alerts.observeRecent(50)
     fun observeUnread(): Flow<Int> = alerts.observeUnread()
     fun observeObjects(): Flow<List<TrackedObjectEntity>> = objects.observeAll()
+    fun observePositions(flightId: String) = positions.observeForFlight(flightId)
+    fun observeAllPositions() = positions.observeAll()
 
     suspend fun getFlight(id: String) = flights.get(id)
     suspend fun listFlights() = flights.listAll()

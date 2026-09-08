@@ -32,6 +32,7 @@
     <string name="flight_monthly_quota">AeroDataBox-Monatskontingent ist aufgebraucht.</string>
     <string name="flight_not_subscribed">AeroDataBox-API-Schlüssel ungültig oder nicht abonniert. In API.Market AeroDataBox abonnieren und den Schlüssel als AERODATABOX_KEY eintragen. RapidAPI-Host und RapidAPI-Schlüssel funktionieren hier nicht.</string>
     <string name="flight_api_error">AeroDataBox hat den Flugplan nicht geliefert.</string>
+    <string name="flight_invalid_api_key">API-Key enthält ungültige Zeichen (z. B. Zeilenumbruch). Key in den Einstellungen neu einfügen, ohne Leerzeile.</string>
     <string name="flight_network_error">Keine Verbindung zu AeroDataBox. Netz prüfen und erneut suchen.</string>
     <string name="flight_manual">Manuell eintragen</string>
     <string name="flight_number">Flugnummer</string>

@@ -6,6 +6,7 @@ import de.rolfwalker.flightbuddy.core.data.FlightRepository
 import de.rolfwalker.flightbuddy.core.data.db.ApiLogDao
 import de.rolfwalker.flightbuddy.core.data.prefs.ApiKeys
 import de.rolfwalker.flightbuddy.core.data.prefs.KeysStore
+import de.rolfwalker.flightbuddy.core.data.prefs.redactProviderError
 import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
 import de.rolfwalker.flightbuddy.core.data.prefs.UserPrefs
 import de.rolfwalker.flightbuddy.core.model.ProviderStatus
@@ -46,14 +47,14 @@ class SettingsViewModel(
             keys = keys,
             aero = ProviderStatus(
                 configured = keys.hasAeroDataBox(),
-                lastError = providers.lastAeroError ?: aeroLog?.error,
+                lastError = redactProviderError(providers.lastAeroError ?: aeroLog?.error),
                 lastCallAt = aeroLog?.at,
                 lastStatusCode = aeroLog?.statusCode,
                 remaining = providers.lastAeroRemaining ?: aeroLog?.remaining,
             ),
             opensky = ProviderStatus(
                 configured = keys.openSkyUsername.isNotBlank(),
-                lastError = providers.lastOpenSkyError ?: osLog?.error,
+                lastError = redactProviderError(providers.lastOpenSkyError ?: osLog?.error),
                 lastCallAt = osLog?.at,
                 lastStatusCode = osLog?.statusCode,
                 remaining = providers.lastOpenSkyRemaining ?: osLog?.remaining,
@@ -61,7 +62,7 @@ class SettingsViewModel(
             fr24 = ProviderStatus(
                 configured = keys.fr24Token.isNotBlank(),
                 enabled = keys.fr24Enabled,
-                lastError = providers.lastFr24Error ?: frLog?.error,
+                lastError = redactProviderError(providers.lastFr24Error ?: frLog?.error),
                 lastCallAt = frLog?.at,
                 lastStatusCode = frLog?.statusCode,
                 remaining = providers.lastFr24Remaining ?: frLog?.remaining,

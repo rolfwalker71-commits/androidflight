@@ -13,8 +13,16 @@ if (localFile.exists()) {
     localFile.inputStream().use { localProperties.load(it) }
 }
 
-fun localOrEmpty(key: String): String =
-    (localProperties.getProperty(key) ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
+fun localOrEmpty(key: String): String {
+    var v = (localProperties.getProperty(key) ?: "").replace("\r", "").replace("\n", "").trim()
+    if (v.length >= 2) {
+        val quote = v.first()
+        if ((quote == '"' || quote == '\'') && v.last() == quote) {
+            v = v.substring(1, v.lastIndex).replace("\r", "").replace("\n", "").trim()
+        }
+    }
+    return v.replace("\\", "\\\\").replace("\"", "\\\"")
+}
 
 android {
     namespace = "de.rolfwalker.flightbuddy"

@@ -96,6 +96,7 @@ fun AddFlightSheet(onDone: () -> Unit, onCancel: () -> Unit, vm: AddFlightViewMo
                         SearchReason.RATE_LIMITED -> R.string.flight_rate_limited
                         SearchReason.MONTHLY_QUOTA -> R.string.flight_monthly_quota
                         SearchReason.NOT_SUBSCRIBED -> R.string.flight_not_subscribed
+                        SearchReason.INVALID_API_KEY -> R.string.flight_invalid_api_key
                         SearchReason.NETWORK_ERROR -> R.string.flight_network_error
                         SearchReason.HTTP_ERROR -> R.string.flight_api_error
                         SearchReason.EMPTY -> R.string.flight_no_results

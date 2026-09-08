@@ -32,6 +32,7 @@
     <string name="flight_monthly_quota">AeroDataBox monthly API units are exhausted.</string>
     <string name="flight_not_subscribed">AeroDataBox API key is invalid or not subscribed. Subscribe on API.Market and set AERODATABOX_KEY. A RapidAPI host or RapidAPI key will not work.</string>
     <string name="flight_api_error">AeroDataBox did not return a schedule.</string>
+    <string name="flight_invalid_api_key">API key contains invalid characters (e.g. a line break). Paste the key again in Settings, as a single line.</string>
     <string name="flight_network_error">Could not reach AeroDataBox. Check the network and try again.</string>
     <string name="flight_manual">Enter manually</string>
     <string name="flight_number">Flight number</string>

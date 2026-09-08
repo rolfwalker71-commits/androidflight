@@ -1,6 +1,7 @@
 package de.rolfwalker.flightbuddy.core.network
 
 import de.rolfwalker.flightbuddy.core.data.prefs.ApiKeys
+import de.rolfwalker.flightbuddy.core.data.prefs.sanitizeApiCredential
 import java.net.URI
 
 /** Official AeroDataBox listing on API.Market (not RapidAPI). Same default as FlightBuddy PWA. */
@@ -32,8 +33,8 @@ private fun ensureHttps(raw: String): String {
  * Blank inputs default to the official API.Market listing — same as the PWA.
  */
 fun resolveAeroEndpoint(baseUrl: String?, host: String?): AeroEndpoint {
-    val fromBase = baseUrl?.trim().orEmpty()
-    val fromHost = host?.trim().orEmpty()
+    val fromBase = sanitizeApiCredential(baseUrl.orEmpty())
+    val fromHost = sanitizeApiCredential(host.orEmpty())
     var raw = fromBase
     if (raw.isBlank() && fromHost.isNotBlank()) {
         raw = fromHost
@@ -58,17 +59,19 @@ fun joinAeroUrl(baseUrl: String, path: String): String {
     return base + suffix
 }
 
-fun ApiKeys.aeroEndpointOrNull(): AeroEndpoint? =
-    if (aeroKey.isBlank()) null else resolveAeroEndpoint(aeroBaseUrl, aeroHost)
+fun ApiKeys.aeroEndpointOrNull(): AeroEndpoint? {
+    val key = sanitizeApiCredential(aeroKey)
+    return if (key.isBlank()) null else resolveAeroEndpoint(aeroBaseUrl, aeroHost)
+}
 
-fun ApiKeys.hasAeroDataBox(): Boolean = aeroKey.isNotBlank()
+fun ApiKeys.hasAeroDataBox(): Boolean = sanitizeApiCredential(aeroKey).isNotBlank()
 
 /** Value shown and edited in Settings — prefer the full https base URL. */
 fun ApiKeys.aeroEndpointInput(): String =
     aeroBaseUrl.ifBlank { aeroHost }.ifBlank { AERO_API_MARKET_BASE_URL }
 
 fun ApiKeys.withAeroEndpointInput(raw: String): ApiKeys {
-    val trimmed = raw.trim()
+    val trimmed = sanitizeApiCredential(raw)
     if (trimmed.isBlank()) {
         return copy(aeroHost = AERO_API_MARKET_HOST, aeroBaseUrl = AERO_API_MARKET_BASE_URL)
     }
@@ -90,10 +93,11 @@ fun ApiKeys.withAeroEndpointInput(raw: String): ApiKeys {
 }
 
 fun ApiKeys.withResolvedAeroDefaults(): ApiKeys {
-    val resolved = resolveAeroEndpoint(aeroBaseUrl, aeroHost)
+    val host = sanitizeApiCredential(aeroHost)
+    val resolved = resolveAeroEndpoint(aeroBaseUrl, host)
     return copy(
         aeroBaseUrl = resolved.aeroBaseUrl,
-        aeroHost = aeroHost.ifBlank { AERO_API_MARKET_HOST },
+        aeroHost = host.ifBlank { AERO_API_MARKET_HOST },
     )
 }
 

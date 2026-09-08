@@ -26,6 +26,53 @@ data class ApiKeys(
     val openSkyMinIntervalMs: Int = 90_000,
 )
 
+/** Sentinel stored/shown instead of OkHttp messages that echo a secret header value. */
+const val INVALID_API_CREDENTIAL_CHARS = "INVALID_API_CREDENTIAL_CHARS"
+
+/**
+ * Strip paste / local.properties junk (newlines, quotes) so OkHttp headers stay valid.
+ * OkHttp rejects header values containing `\n` / `\r`.
+ */
+fun sanitizeApiCredential(raw: String): String {
+    var s = raw.replace("\r", "").replace("\n", "").trim()
+    if (s.length >= 2) {
+        val quote = s.first()
+        if ((quote == '"' || quote == '\'') && s.last() == quote) {
+            s = s.substring(1, s.lastIndex).replace("\r", "").replace("\n", "").trim()
+        }
+    }
+    return s
+}
+
+fun ApiKeys.sanitized(): ApiKeys = copy(
+    openSkyUsername = sanitizeApiCredential(openSkyUsername),
+    openSkyPassword = sanitizeApiCredential(openSkyPassword),
+    aeroKey = sanitizeApiCredential(aeroKey),
+    aeroBaseUrl = sanitizeApiCredential(aeroBaseUrl),
+    aeroHost = sanitizeApiCredential(aeroHost),
+    fr24Token = sanitizeApiCredential(fr24Token),
+)
+
+fun isUnsafeHeaderError(message: String?): Boolean {
+    val m = message.orEmpty()
+    if (m.isBlank()) return false
+    return m.contains("Unexpected char", ignoreCase = true) ||
+        m.contains("x-api-market-key", ignoreCase = true) ||
+        m.contains("x-magicapi-key", ignoreCase = true) ||
+        m.contains("X-RapidAPI-Key", ignoreCase = true) ||
+        m.contains("header value", ignoreCase = true) ||
+        m.contains(INVALID_API_CREDENTIAL_CHARS)
+}
+
+fun isInvalidApiCredentialException(e: Throwable): Boolean =
+    e is IllegalArgumentException || isUnsafeHeaderError(e.message)
+
+fun redactProviderError(message: String?): String? {
+    if (message.isNullOrBlank()) return null
+    if (isUnsafeHeaderError(message)) return INVALID_API_CREDENTIAL_CHARS
+    return message
+}
+
 class KeysStore(context: Context) {
     private val app = context.applicationContext
     private val prefs: SharedPreferences by lazy { encryptedPrefs() }
@@ -43,7 +90,7 @@ class KeysStore(context: Context) {
         )
     }
 
-    private fun read(): ApiKeys = ApiKeys(
+    private fun readRaw(): ApiKeys = ApiKeys(
         openSkyUsername = prefs.getString("opensky_user", "") ?: "",
         openSkyPassword = prefs.getString("opensky_pass", "") ?: "",
         aeroKey = prefs.getString("aero_key", "") ?: "",
@@ -55,6 +102,8 @@ class KeysStore(context: Context) {
         openSkyMinIntervalMs = prefs.getInt("opensky_min", 90_000),
     )
 
+    private fun read(): ApiKeys = readRaw().sanitized()
+
     /**
      * Seed blank fields from BuildConfig (`local.properties`).
      * If a stored value still equals the last applied seed, refresh it when
@@ -62,12 +111,16 @@ class KeysStore(context: Context) {
      */
     suspend fun seedFromBuildConfigIfEmpty() = withContext(Dispatchers.IO) {
         val current = read()
-        val seedKey = BuildConfig.SEED_AERODATABOX_KEY.trim()
-        val seedHost = BuildConfig.SEED_AERODATABOX_HOST.trim()
-        val seedBase = BuildConfig.SEED_AERODATABOX_BASE_URL.trim()
-        val seedUser = BuildConfig.SEED_OPENSKY_CLIENT_ID.ifBlank { BuildConfig.SEED_OPENSKY_USERNAME }.trim()
-        val seedPass = BuildConfig.SEED_OPENSKY_CLIENT_SECRET.ifBlank { BuildConfig.SEED_OPENSKY_PASSWORD }.trim()
-        val seedFr24 = BuildConfig.SEED_FR24_API_TOKEN.trim()
+        val seedKey = sanitizeApiCredential(BuildConfig.SEED_AERODATABOX_KEY)
+        val seedHost = sanitizeApiCredential(BuildConfig.SEED_AERODATABOX_HOST)
+        val seedBase = sanitizeApiCredential(BuildConfig.SEED_AERODATABOX_BASE_URL)
+        val seedUser = sanitizeApiCredential(
+            BuildConfig.SEED_OPENSKY_CLIENT_ID.ifBlank { BuildConfig.SEED_OPENSKY_USERNAME },
+        )
+        val seedPass = sanitizeApiCredential(
+            BuildConfig.SEED_OPENSKY_CLIENT_SECRET.ifBlank { BuildConfig.SEED_OPENSKY_PASSWORD },
+        )
+        val seedFr24 = sanitizeApiCredential(BuildConfig.SEED_FR24_API_TOKEN)
 
         val nextKey = pickSeed(current.aeroKey, prefs.getString("aero_key_from_seed", ""), seedKey)
         val nextHost = pickSeed(current.aeroHost, prefs.getString("aero_host_from_seed", ""), seedHost)
@@ -103,7 +156,8 @@ class KeysStore(context: Context) {
             .putString("opensky_pass_from_seed", seedPass)
             .putString("fr24_token_from_seed", seedFr24)
             .apply()
-        if (seeded != current) save(seeded) else _keys.value = current.withResolvedAeroDefaults()
+        val dirtyStored = readRaw() != current
+        if (seeded != current || dirtyStored) save(seeded) else _keys.value = current.withResolvedAeroDefaults()
     }
 
     private fun pickSeed(current: String?, lastAppliedSeed: String?, newSeed: String): String {
@@ -118,7 +172,7 @@ class KeysStore(context: Context) {
     }
 
     suspend fun save(next: ApiKeys) = withContext(Dispatchers.IO) {
-        val resolved = next.withResolvedAeroDefaults()
+        val resolved = next.sanitized().withResolvedAeroDefaults()
         prefs.edit()
             .putString("opensky_user", resolved.openSkyUsername)
             .putString("opensky_pass", resolved.openSkyPassword)

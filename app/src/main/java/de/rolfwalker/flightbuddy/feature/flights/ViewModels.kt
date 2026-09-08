@@ -13,6 +13,7 @@ import de.rolfwalker.flightbuddy.core.model.AircraftPhoto
 import de.rolfwalker.flightbuddy.core.model.ConnectionInfo
 import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
 import de.rolfwalker.flightbuddy.core.model.SearchReason
+import de.rolfwalker.flightbuddy.core.data.prefs.isInvalidApiCredentialException
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
 import de.rolfwalker.flightbuddy.tracking.TrackerController
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,7 +78,7 @@ fun inferConnections(flights: List<FlightEntity>): Map<String, ConnectionInfo> {
 
 class AddFlightViewModel(private val repo: FlightRepository) : ViewModel() {
     data class Ui(
-        val query: String = "LH441",
+        val query: String = "",
         val date: LocalDate = LocalDate.now(),
         val loading: Boolean = false,
         val results: List<FlightSearchResult> = emptyList(),
@@ -101,7 +102,11 @@ class AddFlightViewModel(private val repo: FlightRepository) : ViewModel() {
                 val out = repo.search(ui.value.query, ui.value.date)
                 update { it.copy(loading = false, results = out.flights, reason = if (out.flights.isEmpty()) out.reason else SearchReason.OK) }
             } catch (e: Exception) {
-                update { it.copy(loading = false, error = e.message, reason = SearchReason.HTTP_ERROR) }
+                if (isInvalidApiCredentialException(e)) {
+                    update { it.copy(loading = false, error = null, reason = SearchReason.INVALID_API_KEY) }
+                } else {
+                    update { it.copy(loading = false, error = null, reason = SearchReason.HTTP_ERROR) }
+                }
             }
         }
     }

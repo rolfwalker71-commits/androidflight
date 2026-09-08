@@ -3,6 +3,11 @@ package de.rolfwalker.flightbuddy.core.network
 import de.rolfwalker.flightbuddy.core.data.db.ApiLogDao
 import de.rolfwalker.flightbuddy.core.data.db.ApiLogEntity
 import de.rolfwalker.flightbuddy.core.data.prefs.ApiKeys
+import de.rolfwalker.flightbuddy.core.data.prefs.INVALID_API_CREDENTIAL_CHARS
+import de.rolfwalker.flightbuddy.core.data.prefs.isInvalidApiCredentialException
+import de.rolfwalker.flightbuddy.core.data.prefs.redactProviderError
+import de.rolfwalker.flightbuddy.core.data.prefs.sanitizeApiCredential
+import de.rolfwalker.flightbuddy.core.data.prefs.sanitized
 import de.rolfwalker.flightbuddy.core.domain.mapProviderStatus
 import de.rolfwalker.flightbuddy.core.model.AircraftPhoto
 import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
@@ -82,7 +87,7 @@ class ProviderClients(
                 endpoint = endpoint,
                 statusCode = code,
                 ok = ok,
-                error = error?.take(400),
+                error = redactProviderError(error)?.take(400),
                 remaining = remaining,
                 at = System.currentTimeMillis(),
             ),
@@ -195,19 +200,21 @@ class ProviderClients(
     }
 
     private fun aeroHeaders(key: String, endpoint: AeroEndpoint): Map<String, String> {
+        val cleanKey = sanitizeApiCredential(key)
+        val cleanHost = sanitizeApiCredential(endpoint.aeroHost)
         val common = mapOf(
             "Accept" to "application/json",
             "User-Agent" to "FlightBuddy/1.0 (Android)",
         )
         return if (endpoint.marketplace == "rapidapi") {
             common + mapOf(
-                "X-RapidAPI-Key" to key,
-                "X-RapidAPI-Host" to endpoint.aeroHost.ifBlank { "aerodatabox.p.rapidapi.com" },
+                "X-RapidAPI-Key" to cleanKey,
+                "X-RapidAPI-Host" to cleanHost.ifBlank { "aerodatabox.p.rapidapi.com" },
             )
         } else {
             common + mapOf(
-                "x-api-market-key" to key,
-                "x-magicapi-key" to key,
+                "x-api-market-key" to cleanKey,
+                "x-magicapi-key" to cleanKey,
             )
         }
     }
@@ -257,10 +264,13 @@ class ProviderClients(
     }
 
     private suspend fun fetchAeroList(keys: ApiKeys, path: String): AeroLookup {
-        val endpoint = keys.aeroEndpointOrNull() ?: return AeroLookup(emptyList(), SearchReason.UNCONFIGURED)
+        val clean = keys.sanitized()
+        val endpoint = clean.aeroEndpointOrNull() ?: return AeroLookup(emptyList(), SearchReason.UNCONFIGURED)
         val url = joinAeroUrl(endpoint.aeroBaseUrl, path)
-        val req = Request.Builder().url(url).apply { aeroHeaders(keys.aeroKey, endpoint).forEach { addHeader(it.key, it.value) } }.build()
         return try {
+            val req = Request.Builder().url(url).apply {
+                aeroHeaders(clean.aeroKey, endpoint).forEach { addHeader(it.key, it.value) }
+            }.build()
             http.newCall(req).execute().use { res ->
                 val body = res.body?.string().orEmpty()
                 val remaining = res.header("x-ratelimit-remaining")?.toIntOrNull()
@@ -272,7 +282,7 @@ class ProviderClients(
                     return AeroLookup(emptyList(), SearchReason.EMPTY, res.code)
                 }
                 if (!res.isSuccessful) {
-                    lastAeroError = "${res.code} ${body.take(180)}"
+                    lastAeroError = redactProviderError("${res.code} ${body.take(180)}")
                     log("aerodatabox", path, res.code, false, lastAeroError, remaining)
                     return AeroLookup(emptyList(), classifyAero(res.code, body), res.code)
                 }
@@ -282,8 +292,13 @@ class ProviderClients(
                 AeroLookup(rows, if (rows.isEmpty()) SearchReason.EMPTY else SearchReason.OK, res.code)
             }
         } catch (e: Exception) {
-            lastAeroError = e.message
-            log("aerodatabox", path, null, false, e.message, null)
+            if (isInvalidApiCredentialException(e)) {
+                lastAeroError = INVALID_API_CREDENTIAL_CHARS
+                log("aerodatabox", path, null, false, lastAeroError, null)
+                return AeroLookup(emptyList(), SearchReason.INVALID_API_KEY)
+            }
+            lastAeroError = redactProviderError(e.message)
+            log("aerodatabox", path, null, false, lastAeroError, null)
             AeroLookup(emptyList(), SearchReason.NETWORK_ERROR)
         }
     }
@@ -306,12 +321,14 @@ class ProviderClients(
     }
 
     private suspend fun openSkyBearer(keys: ApiKeys): String? {
-        if (keys.openSkyUsername.isBlank() || keys.openSkyPassword.isBlank()) return null
+        val user = sanitizeApiCredential(keys.openSkyUsername)
+        val pass = sanitizeApiCredential(keys.openSkyPassword)
+        if (user.isBlank() || pass.isBlank()) return null
         if (openSkyToken != null && System.currentTimeMillis() < openSkyTokenExp) return openSkyToken
         val body = FormBody.Builder()
             .add("grant_type", "client_credentials")
-            .add("client_id", keys.openSkyUsername)
-            .add("client_secret", keys.openSkyPassword)
+            .add("client_id", user)
+            .add("client_secret", pass)
             .build()
         val req = Request.Builder()
             .url("https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token")
@@ -332,7 +349,9 @@ class ProviderClients(
                 openSkyToken
             }
         } catch (e: Exception) {
-            lastOpenSkyError = e.message
+            lastOpenSkyError = if (isInvalidApiCredentialException(e)) {
+                INVALID_API_CREDENTIAL_CHARS
+            } else redactProviderError(e.message)
             null
         }
     }
@@ -358,17 +377,17 @@ class ProviderClients(
             }
             if (parts.isNotEmpty()) append("?").append(parts.joinToString("&"))
         }
-        val token = openSkyBearer(keys)
-        val req = Request.Builder().url(qs).header("Accept", "application/json").apply {
-            if (token != null) header("Authorization", "Bearer $token")
-        }.build()
+        val token = openSkyBearer(keys)?.let { sanitizeApiCredential(it) }
         return try {
+            val req = Request.Builder().url(qs).header("Accept", "application/json").apply {
+                if (!token.isNullOrBlank()) header("Authorization", "Bearer $token")
+            }.build()
             http.newCall(req).execute().use { res ->
                 lastOpenSkyRemaining = res.header("X-Rate-Limit-Remaining")?.toIntOrNull()
                     ?: res.header("x-rate-limit-remaining")?.toIntOrNull()
                 val body = res.body?.string().orEmpty()
                 if (!res.isSuccessful) {
-                    lastOpenSkyError = "${res.code} ${body.take(120)}"
+                    lastOpenSkyError = redactProviderError("${res.code} ${body.take(120)}")
                     log("opensky", qs, res.code, false, lastOpenSkyError, lastOpenSkyRemaining)
                     return emptyList()
                 }
@@ -395,14 +414,17 @@ class ProviderClients(
                 }
             }
         } catch (e: Exception) {
-            lastOpenSkyError = e.message
-            log("opensky", qs, null, false, e.message, null)
+            lastOpenSkyError = if (isInvalidApiCredentialException(e)) {
+                INVALID_API_CREDENTIAL_CHARS
+            } else redactProviderError(e.message)
+            log("opensky", qs, null, false, lastOpenSkyError, null)
             emptyList()
         }
     }
 
     suspend fun fetchFr24(keys: ApiKeys, flightNumber: String?, callsign: String?, icao24: String?, lat: Double?, lon: Double?): LiveFix? {
-        if (keys.fr24Token.isBlank() || !keys.fr24Enabled) return null
+        val token = sanitizeApiCredential(keys.fr24Token)
+        if (token.isBlank() || !keys.fr24Enabled) return null
         val min = keys.fr24MinIntervalMs.toLong().coerceAtLeast(180_000)
         val since = System.currentTimeMillis() - lastFr24.get()
         if (lastFr24.get() != 0L && since < min) return null
@@ -426,18 +448,18 @@ class ProviderClients(
             }
             else -> return null
         }
-        val req = Request.Builder()
-            .url("https://fr24api.flightradar24.com$path")
-            .header("Accept", "application/json")
-            .header("Accept-Version", "v1")
-            .header("Authorization", "Bearer ${keys.fr24Token}")
-            .build()
         return try {
+            val req = Request.Builder()
+                .url("https://fr24api.flightradar24.com$path")
+                .header("Accept", "application/json")
+                .header("Accept-Version", "v1")
+                .header("Authorization", "Bearer $token")
+                .build()
             http.newCall(req).execute().use { res ->
                 val body = res.body?.string().orEmpty()
                 lastFr24Remaining = res.header("x-rate-limit-remaining")?.toIntOrNull()
                 if (!res.isSuccessful) {
-                    lastFr24Error = "${res.code} ${body.take(120)}"
+                    lastFr24Error = redactProviderError("${res.code} ${body.take(120)}")
                     log("fr24", path, res.code, false, lastFr24Error, lastFr24Remaining)
                     return null
                 }
@@ -465,8 +487,10 @@ class ProviderClients(
                 )
             }
         } catch (e: Exception) {
-            lastFr24Error = e.message
-            log("fr24", path, null, false, e.message, null)
+            lastFr24Error = if (isInvalidApiCredentialException(e)) {
+                INVALID_API_CREDENTIAL_CHARS
+            } else redactProviderError(e.message)
+            log("fr24", path, null, false, lastFr24Error, null)
             null
         }
     }

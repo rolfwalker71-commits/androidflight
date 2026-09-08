@@ -32,6 +32,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.DateTimeFmt
+import de.rolfwalker.flightbuddy.core.data.prefs.INVALID_API_CREDENTIAL_CHARS
+import de.rolfwalker.flightbuddy.core.data.prefs.isUnsafeHeaderError
 import de.rolfwalker.flightbuddy.core.model.MapStyleId
 import de.rolfwalker.flightbuddy.core.model.ThemeMode
 import de.rolfwalker.flightbuddy.core.model.Units
@@ -127,22 +129,24 @@ fun SettingsScreen(vm: SettingsViewModel) {
         }
 
         Section(stringResource(R.string.settings_api_keys)) {
-            OutlinedTextField(ui.keys.openSkyUsername, { v -> vm.updateKeys { it.copy(openSkyUsername = v) } }, label = { Text(stringResource(R.string.settings_opensky_user)) }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(ui.keys.openSkyPassword, { v -> vm.updateKeys { it.copy(openSkyPassword = v) } }, label = { Text(stringResource(R.string.settings_opensky_pass)) }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(ui.keys.openSkyUsername, { v -> vm.updateKeys { it.copy(openSkyUsername = v) } }, label = { Text(stringResource(R.string.settings_opensky_user)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(ui.keys.openSkyPassword, { v -> vm.updateKeys { it.copy(openSkyPassword = v) } }, label = { Text(stringResource(R.string.settings_opensky_pass)) }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
             OutlinedTextField(
                 ui.keys.aeroKey,
                 { v -> vm.updateKeys { it.copy(aeroKey = v) } },
                 label = { Text("AERODATABOX_KEY") },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
             )
             OutlinedTextField(
                 ui.keys.aeroHost,
                 { v -> vm.updateKeys { it.copy(aeroHost = v) } },
                 label = { Text("AERODATABOX_HOST") },
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
             )
-            OutlinedTextField(ui.keys.fr24Token, { v -> vm.updateKeys { it.copy(fr24Token = v) } }, label = { Text("FR24_API_TOKEN") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(ui.keys.fr24Token, { v -> vm.updateKeys { it.copy(fr24Token = v) } }, label = { Text("FR24_API_TOKEN") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
             Pref(stringResource(R.string.settings_fr24_enable), ui.keys.fr24Enabled) { v -> vm.updateKeys { it.copy(fr24Enabled = v) } }
             Text(stringResource(R.string.settings_fr24_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(ui.keys.fr24MinIntervalMs.toString(), { v -> v.toIntOrNull()?.let { n -> vm.updateKeys { it.copy(fr24MinIntervalMs = n) } } }, label = { Text("FR24_MIN_INTERVAL_MS") }, modifier = Modifier.fillMaxWidth())
@@ -177,7 +181,14 @@ private fun Pref(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
 @Composable
 private fun ProviderLine(name: String, status: de.rolfwalker.flightbuddy.core.model.ProviderStatus) {
     Column {
-        Text("$name · " + if (!status.configured) stringResource(R.string.settings_provider_off) else if (status.lastError != null) status.lastError!! else stringResource(R.string.settings_healthy))
+        val detail = when {
+            !status.configured -> stringResource(R.string.settings_provider_off)
+            status.lastError == INVALID_API_CREDENTIAL_CHARS || isUnsafeHeaderError(status.lastError) ->
+                stringResource(R.string.flight_invalid_api_key)
+            status.lastError != null -> status.lastError!!
+            else -> stringResource(R.string.settings_healthy)
+        }
+        Text("$name · $detail")
         status.remaining?.let { Text(stringResource(R.string.settings_remaining, it), style = MaterialTheme.typography.bodySmall) }
         status.lastCallAt?.let {
             Text(

@@ -69,7 +69,7 @@ Resizeable Glance-Widget (praktisch 2×1 bis 5×4: 2×1, 2×2, 3×2, 4×1, 4×2,
 
 ### Hinweis
 
-Airline-Logos: [pics.avs.io](https://pics.avs.io) (Travelpayouts) — keine offiziellen Marken. Kartentiles: Carto / OSM / Esri / OpenTopo. Fotos: Planespotters.net. API-Nutzung unterliegt den jeweiligen ToS (AeroDataBox API.Market, OpenSky, FR24 official API — kein Scraping von flightradar24.com).
+Airline-Logos: [images.kiwi.com](https://images.kiwi.com) (Kiwi.com square marks) — keine offiziellen Marken. Kartentiles: Carto / OSM / Esri / OpenTopo. Fotos: Planespotters.net. API-Nutzung unterliegt den jeweiligen ToS (AeroDataBox API.Market, OpenSky, FR24 official API — kein Scraping von flightradar24.com).
 
 ## English
 

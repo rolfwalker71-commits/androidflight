@@ -6,6 +6,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
@@ -26,7 +30,7 @@ import org.koin.core.context.GlobalContext
  */
 internal object RemoteFlightWidget {
     private const val TAG = "FlightBuddy/Widget"
-    private const val LOGO_MAX_DP = 54
+    private const val LOGO_MAX_DP = 70
 
     fun updateAll(context: Context) {
         val mgr = AppWidgetManager.getInstance(context)
@@ -70,14 +74,12 @@ internal object RemoteFlightWidget {
 
         val options = runCatching { mgr.getAppWidgetOptions(appWidgetId) }.getOrNull()
         val minW = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 0
-        val minH = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) ?: 0
         val wide = minW >= 250
-        val tallEnough = minH >= 110
 
         val model = widgetCardModel(
             context = context,
             f = flight,
-            showFreshness = wide || tallEnough,
+            showFreshness = true,
             showWeekday = wide,
             showBaggage = wide,
         )
@@ -86,9 +88,11 @@ internal object RemoteFlightWidget {
         val logo = runCatching { runBlocking { loadAirlineLogo(context, iata) } }.getOrNull()
         bindLogo(context, views, flight, iata, logo)
 
-        views.setTextViewText(R.id.widget_airline_flight, model.airlineFlight)
+        views.setTextViewText(
+            R.id.widget_airline_flight,
+            airlineFlightHeaderSpanned(context, model.airlineFlight, model.freshness),
+        )
         views.setTextViewText(R.id.widget_city_route, model.cityRoute)
-        bindOptionalLine(views, R.id.widget_freshness, model.freshness)
 
         views.setTextViewText(R.id.widget_status_pill, statusLabel(context, model.chip))
         views.setTextColor(
@@ -173,15 +177,42 @@ internal object RemoteFlightWidget {
         }
     }
 
+    /** Always decode into the 70dp square so ImageView intrinsic size cannot blow the row. */
     private fun scaleLogo(context: Context, src: Bitmap): Bitmap {
-        val maxPx = (LOGO_MAX_DP * context.resources.displayMetrics.density).toInt().coerceAtLeast(24)
+        val density = context.resources.displayMetrics.density
+        val max = (LOGO_MAX_DP * density).toInt().coerceAtLeast(24)
         val bw = src.width.coerceAtLeast(1)
         val bh = src.height.coerceAtLeast(1)
-        if (bh <= maxPx && bw <= maxPx * 2) return src
-        val scale = maxPx.toFloat() / bh
+        val scale = minOf(max.toFloat() / bw, max.toFloat() / bh)
         val w = (bw * scale).toInt().coerceAtLeast(1)
         val h = (bh * scale).toInt().coerceAtLeast(1)
+        if (src.width == w && src.height == h) return src
         return Bitmap.createScaledBitmap(src, w, h, true)
+    }
+
+    private fun airlineFlightHeaderSpanned(
+        context: Context,
+        airlineFlight: String,
+        freshness: String?,
+    ): CharSequence {
+        if (freshness.isNullOrBlank()) return airlineFlight
+        val suffix = " ($freshness)"
+        val full = airlineFlight + suffix
+        val start = airlineFlight.length
+        return SpannableString(full).apply {
+            setSpan(
+                ForegroundColorSpan(ContextCompat.getColor(context, R.color.widget_text_muted)),
+                start,
+                full.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            setSpan(
+                AbsoluteSizeSpan(11, true),
+                start,
+                full.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+        }
     }
 
     private fun bindOptionalLine(views: RemoteViews, id: Int, text: String?) {

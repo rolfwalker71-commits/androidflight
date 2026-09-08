@@ -392,10 +392,11 @@ fun displayFlightNumber(code: String): String {
 fun airlineLogoUrl(iata: String?): String? {
     val code = iata?.trim()?.uppercase().orEmpty()
     if (code.length !in 2..3) return null
-    return "https://pics.avs.io/200/200/$code.png"
+    // Kiwi square mark (tail / brand icon). Not the wide pics.avs.io wordmark.
+    return "https://images.kiwi.com/airlines/128x128/$code.png"
 }
 
-/** IATA for pics.avs.io — stored code, else 2-letter prefix of the flight number. */
+/** IATA for the airline mark URL — stored code, else 2-letter prefix of the flight number. */
 fun airlineCodeForLogo(iata: String?, flightNumber: String?): String? {
     val fromIata = iata?.trim()?.uppercase().orEmpty()
     if (fromIata.length in 2..3) return fromIata

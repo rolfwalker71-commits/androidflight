@@ -55,14 +55,12 @@
 
         <ImageView
             android:id="@+id/notif_logo"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:layout_marginStart="8dp"
             android:adjustViewBounds="true"
             android:contentDescription="@string/app_name"
-            android:maxHeight="36dp"
-            android:maxWidth="72dp"
-            android:scaleType="fitEnd" />
+            android:scaleType="fitCenter" />
 
         <TextView
             android:id="@+id/notif_logo_fallback"

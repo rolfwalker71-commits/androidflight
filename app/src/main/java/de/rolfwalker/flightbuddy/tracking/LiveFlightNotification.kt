@@ -244,10 +244,10 @@ class LiveFlightNotification(
         val maxPx = (LOGO_MAX_DP * context.resources.displayMetrics.density).toInt().coerceAtLeast(24)
         val bw = src.width.coerceAtLeast(1)
         val bh = src.height.coerceAtLeast(1)
-        if (bh <= maxPx && bw <= maxPx * 2) return src
-        val scale = maxPx.toFloat() / bh
+        val scale = minOf(maxPx.toFloat() / bw, maxPx.toFloat() / bh)
         val w = (bw * scale).toInt().coerceAtLeast(1)
         val h = (bh * scale).toInt().coerceAtLeast(1)
+        if (src.width == w && src.height == h) return src
         return Bitmap.createScaledBitmap(src, w, h, true)
     }
 

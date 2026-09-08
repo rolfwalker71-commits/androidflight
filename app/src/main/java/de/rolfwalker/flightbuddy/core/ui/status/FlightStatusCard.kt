@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -30,8 +29,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -44,8 +46,7 @@ import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.ui.Warning
 
 private object StatusCardLogo {
-    val maxHeight = 54.dp
-    val maxWidth = 108.dp
+    val size = 44.dp
 }
 
 private object StatusCardPlane {
@@ -76,7 +77,7 @@ fun FlightStatusCard(
     Column(
         modifier.padding(
             start = pad,
-            top = pad + 8.dp,
+            top = pad + 12.dp,
             end = pad,
             bottom = pad,
         ),
@@ -87,13 +88,13 @@ fun FlightStatusCard(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    model.airlineFlight,
+                    airlineFlightHeaderAnnotated(model.airlineFlight, model.freshness),
                     style = MaterialTheme.typography.labelLarge.copy(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
@@ -107,15 +108,6 @@ fun FlightStatusCard(
                     maxLines = 2,
                     overflow = TextOverflow.Clip,
                 )
-                model.freshness?.let { fresh ->
-                    Text(
-                        fresh,
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
             Spacer(Modifier.width(8.dp))
             StatusAirlineLogo(
@@ -123,7 +115,7 @@ fun FlightStatusCard(
                 name = flight.airlineName,
             )
         }
-        Spacer(Modifier.height(6.dp))
+        Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -173,6 +165,26 @@ fun FlightStatusCard(
                 )
             }
         }
+        }
+    }
+}
+
+@Composable
+private fun airlineFlightHeaderAnnotated(
+    airlineFlight: String,
+    freshness: String?,
+) = buildAnnotatedString {
+    append(airlineFlight)
+    if (!freshness.isNullOrBlank()) {
+        withStyle(
+            SpanStyle(
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Normal,
+            ),
+        ) {
+            append(" ($freshness)")
+        }
     }
 }
 
@@ -183,8 +195,7 @@ private fun StatusAirlineLogo(iata: String?, name: String?) {
     val desc = stringResource(R.string.a11y_airline_logo, name ?: iata ?: "?")
     Box(
         modifier = Modifier
-            .height(StatusCardLogo.maxHeight)
-            .widthIn(min = 40.dp, max = StatusCardLogo.maxWidth)
+            .size(StatusCardLogo.size)
             .semantics { contentDescription = desc },
         contentAlignment = Alignment.TopEnd,
     ) {
@@ -193,9 +204,7 @@ private fun StatusAirlineLogo(iata: String?, name: String?) {
                 model = url,
                 contentDescription = desc,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .height(StatusCardLogo.maxHeight)
-                    .widthIn(max = StatusCardLogo.maxWidth),
+                modifier = Modifier.size(StatusCardLogo.size),
             )
         } else {
             Text(

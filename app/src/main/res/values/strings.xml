@@ -188,7 +188,7 @@
     <string name="settings_provider_off">nicht konfiguriert</string>
     <string name="settings_healthy">in Ordnung</string>
     <string name="settings_remaining">noch %1$d</string>
-    <string name="settings_logo_note">Airline-Logos über pics.avs.io (Travelpayouts). Keine offiziellen Marken oder Lizenzen.</string>
+    <string name="settings_logo_note">Airline-Logos über images.kiwi.com (Kiwi.com). Keine offiziellen Marken oder Lizenzen.</string>
     <string name="tracker_title">FlightBuddy überwacht deine Flüge</string>
     <string name="tracker_body">Live-Status, Delays, Diversions und Squawks — auch im Hintergrund.</string>
     <string name="tracker_minimal_title">Überwachung…</string>
@@ -221,7 +221,7 @@
     <string name="widget_preflight_start">geplanter Start in %1$d Std. %2$d Min.</string>
     <string name="widget_inflight_remaining">noch %1$d Std. %2$d Min.</string>
     <string name="widget_arrival_in">Ankunft in %1$d Std. %2$d Min.</string>
-    <string name="widget_city_to">%1$s nach %2$s</string>
+    <string name="widget_city_to">%1$s → %2$s</string>
     <string name="widget_updated_just">Gerade aktualisiert</string>
     <string name="widget_updated_min">Vor %1$d Min. aktualisiert</string>
     <string name="widget_updated_hr">Vor %1$d Std. aktualisiert</string>

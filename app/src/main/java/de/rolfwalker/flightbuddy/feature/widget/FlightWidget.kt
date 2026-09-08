@@ -16,7 +16,6 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
-import androidx.glance.LocalSize
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
@@ -61,6 +60,7 @@ import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.ui.isLegDelayed
 import de.rolfwalker.flightbuddy.core.ui.resolveLegTimes
 import de.rolfwalker.flightbuddy.core.ui.status.FlightProgressMarker
+import de.rolfwalker.flightbuddy.core.ui.status.airlineFlightWithFreshness
 import de.rolfwalker.flightbuddy.core.ui.status.flightProgressPercent
 import de.rolfwalker.flightbuddy.core.ui.status.flightStatusLabel
 import de.rolfwalker.flightbuddy.core.ui.status.progressMarkerDrawable
@@ -79,18 +79,17 @@ val PARAM_FLIGHT_ID = ActionParameters.Key<String>("flight_id")
 
 /** Tight top-aligned 4×2 / 5×2 — never vertically centered. */
 private object WidgetPad {
-    val compactHorizontal = 8.dp
-    val roomyHorizontal = 10.dp
-    val top = 12.dp
+    val horizontal = 8.dp
+    val top = 16.dp
     val bottom = 4.dp
     val logoGap = 6.dp
-    val section = 2.dp
+    /** Logo 70dp, title ~40dp. Pull so the chip stays ~20dp under the title. */
+    val titleToChipPull = (-10).dp
 }
 
-/** Header logo (Google Flights). Width follows aspect — never cropped. */
+/** Header mark. Fixed 70dp square — never wrap to bitmap pixels. */
 private object WidgetLogo {
-    const val compactMaxHeight = 54
-    const val roomyMaxHeight = 54
+    const val sizeDp = 70
 }
 
 /** Progress-line plane. Material flight glyph is rotated 90° CW in the drawable. */
@@ -138,23 +137,27 @@ internal object WidgetPins {
 }
 
 open class FlightBuddyWidget : GlanceAppWidget() {
-    override val sizeMode = SizeMode.Exact
+    /** Single composition — Exact remasured on every tick and the host scaled the card. */
+    override val sizeMode = SizeMode.Single
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val appWidgetId = runCatching { GlanceAppWidgetManager(context).getAppWidgetId(id) }.getOrNull()
         try {
             val repo = object : KoinComponent { val r: FlightRepository by inject() }.r
             val flight = resolveWidgetFlight(context, id, repo)
             val iata = airlineCodeForLogo(flight?.airlineIata, flight?.flightNumber)
             val logo = runCatching { loadAirlineLogo(context, iata) }.getOrNull()
+            val wide = appWidgetId?.let { isWideWidget(context, it) } ?: false
+            val widthDp = appWidgetId?.let { widgetWidthDp(context, it) } ?: 250
             provideContent {
-                WidgetBody(context, flight, iata, logo)
+                WidgetBody(context, flight, iata, logo, wide, widthDp)
             }
         } catch (t: Throwable) {
             Log.e("FlightBuddy/Widget", "provideGlance failed", t)
-            val appWidgetId = runCatching { GlanceAppWidgetManager(context).getAppWidgetId(id) }.getOrNull()
-            if (appWidgetId != null) {
-                runCatching { RemoteFlightWidget.update(context, appWidgetId) }
-            }
+        }
+        // RemoteViews is the displayed card. Glance must not remain the last writer.
+        if (appWidgetId != null) {
+            runCatching { RemoteFlightWidget.update(context, appWidgetId) }
         }
     }
 }
@@ -200,13 +203,26 @@ private suspend fun persistPin(context: Context, glanceId: GlanceId, flightId: S
     updateAppWidgetState(context, glanceId) { it[WIDGET_FLIGHT_ID] = flightId }
 }
 
+private fun widgetOptions(context: Context, appWidgetId: Int): Bundle? =
+    runCatching { AppWidgetManager.getInstance(context).getAppWidgetOptions(appWidgetId) }.getOrNull()
+
+/** Same breakpoint as [RemoteFlightWidget] (min width ≥ 250). */
+private fun isWideWidget(context: Context, appWidgetId: Int): Boolean =
+    (widgetOptions(context, appWidgetId)?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 0) >= 250
+
+private fun widgetWidthDp(context: Context, appWidgetId: Int): Int =
+    (widgetOptions(context, appWidgetId)?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 250)
+        .coerceAtLeast(110)
+
 @Composable
-private fun WidgetBody(context: Context, flight: FlightEntity?, iata: String?, logo: Bitmap?) {
-    val size = LocalSize.current
-    val narrow = size.width < 180.dp
-    val short = size.height < 72.dp
-    val compact = narrow || short
-    val wide = size.width >= 280.dp
+private fun WidgetBody(
+    context: Context,
+    flight: FlightEntity?,
+    iata: String?,
+    logo: Bitmap?,
+    wide: Boolean,
+    widthDp: Int,
+) {
     val click = if (flight != null) {
         actionStartActivity<MainActivity>(actionParametersOf(PARAM_FLIGHT_ID to flight.id))
     } else {
@@ -217,9 +233,9 @@ private fun WidgetBody(context: Context, flight: FlightEntity?, iata: String?, l
             .fillMaxSize()
             .background(WidgetColors.background)
             .padding(
-                start = if (compact) WidgetPad.compactHorizontal else WidgetPad.roomyHorizontal,
+                start = WidgetPad.horizontal,
                 top = WidgetPad.top,
-                end = if (compact) WidgetPad.compactHorizontal else WidgetPad.roomyHorizontal,
+                end = WidgetPad.horizontal,
                 bottom = WidgetPad.bottom,
             )
             .clickable(click),
@@ -232,7 +248,7 @@ private fun WidgetBody(context: Context, flight: FlightEntity?, iata: String?, l
         val model = widgetCardModel(
             context = context,
             f = flight,
-            showFreshness = wide || size.height >= 120.dp,
+            showFreshness = true,
             showWeekday = wide,
             showBaggage = wide,
         )
@@ -246,72 +262,63 @@ private fun WidgetBody(context: Context, flight: FlightEntity?, iata: String?, l
                 modifier = GlanceModifier.fillMaxWidth(),
             ) {
                 Column(modifier = GlanceModifier.defaultWeight()) {
-                    Text(
-                        model.airlineFlight,
-                        style = TextStyle(
-                            color = WidgetColors.primaryText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                        ),
-                        maxLines = 1,
+                    AirlineFlightHeader(
+                        airlineFlight = model.airlineFlight,
+                        freshness = model.freshness,
+                        sideBySide = wide,
                     )
                     Text(
                         model.cityRoute,
                         style = TextStyle(
                             color = WidgetColors.primaryText,
-                            fontSize = if (compact) 15.sp else 16.sp,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        maxLines = 2,
+                    )
+                }
+                Spacer(GlanceModifier.width(WidgetPad.logoGap))
+                LogoBox(iata, flight.airlineName, logo)
+            }
+            Column(
+                modifier = GlanceModifier.fillMaxWidth().padding(top = WidgetPad.titleToChipPull),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = GlanceModifier.fillMaxWidth(),
+                ) {
+                    StatusPill(context, model.chip)
+                    Spacer(GlanceModifier.width(6.dp))
+                    Text(
+                        model.countdown,
+                        style = TextStyle(
+                            color = statusColor(model.chip),
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                         ),
                         maxLines = 1,
                     )
-                    model.freshness?.let { fresh ->
+                }
+                Spacer(GlanceModifier.height(4.dp))
+                RoutePlaneRow(
+                    from = model.fromIata,
+                    to = model.toIata,
+                    fraction = model.progress / 100f,
+                    showIata = model.showRouteIata,
+                    marker = model.progressMarker,
+                    widthDp = widthDp,
+                )
+                Spacer(GlanceModifier.height(2.dp))
+                BigTimesRow(context, model)
+                if (wide) {
+                    model.weekday?.let { day ->
                         Text(
-                            fresh,
-                            style = TextStyle(color = WidgetColors.secondaryText, fontSize = 11.sp),
+                            day,
+                            style = TextStyle(color = WidgetColors.secondaryText, fontSize = 10.sp),
                             maxLines = 1,
                         )
                     }
                 }
-                Spacer(GlanceModifier.width(WidgetPad.logoGap))
-                LogoBox(iata, flight.airlineName, logo, WidgetLogo.compactMaxHeight)
-            }
-            Spacer(GlanceModifier.height(WidgetPad.section))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = GlanceModifier.fillMaxWidth(),
-            ) {
-                StatusPill(context, model.chip)
-                Spacer(GlanceModifier.width(6.dp))
-                Text(
-                    model.countdown,
-                    style = TextStyle(
-                        color = statusColor(model.chip),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    maxLines = 1,
-                )
-            }
-            Spacer(GlanceModifier.height(3.dp))
-            RoutePlaneRow(
-                from = model.fromIata,
-                to = model.toIata,
-                fraction = model.progress / 100f,
-                showIata = model.showRouteIata,
-                marker = model.progressMarker,
-            )
-            Spacer(GlanceModifier.height(2.dp))
-            BigTimesRow(context, model)
-            if (wide) {
-                model.weekday?.let { day ->
-                    Text(
-                        day,
-                        style = TextStyle(color = WidgetColors.secondaryText, fontSize = 10.sp),
-                        maxLines = 1,
-                    )
-                }
-            }
-            if (!short) {
                 Spacer(GlanceModifier.height(2.dp))
                 Row(modifier = GlanceModifier.fillMaxWidth()) {
                     Text(
@@ -338,9 +345,10 @@ private fun RoutePlaneRow(
     fraction: Float,
     showIata: Boolean,
     marker: FlightProgressMarker,
+    widthDp: Int,
 ) {
     val iataReserve = if (showIata) 72.dp else 16.dp
-    val avail = (LocalSize.current.width - iataReserve).coerceAtLeast(40.dp)
+    val avail = (widthDp.dp - iataReserve).coerceAtLeast(40.dp)
     val markerAt = (avail * fraction.coerceIn(0f, 1f)).coerceAtLeast(0.dp)
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -485,16 +493,67 @@ private fun StatusPill(context: Context, status: FlightStatus) {
 }
 
 @Composable
+private fun AirlineFlightHeader(
+    airlineFlight: String,
+    freshness: String?,
+    sideBySide: Boolean,
+) {
+    if (freshness.isNullOrBlank()) {
+        Text(
+            airlineFlight,
+            style = TextStyle(
+                color = WidgetColors.primaryText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+            ),
+            maxLines = 1,
+        )
+        return
+    }
+    if (sideBySide) {
+        // Glance has no spans — two Texts keep the parenthetical smaller/gray.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = GlanceModifier.fillMaxWidth(),
+        ) {
+            Text(
+                airlineFlight,
+                style = TextStyle(
+                    color = WidgetColors.primaryText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+                maxLines = 1,
+            )
+            Text(
+                " ($freshness)",
+                style = TextStyle(color = WidgetColors.secondaryText, fontSize = 11.sp),
+                maxLines = 1,
+            )
+        }
+        return
+    }
+    Text(
+        airlineFlightWithFreshness(airlineFlight, freshness),
+        style = TextStyle(
+            color = WidgetColors.primaryText,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        ),
+        maxLines = 1,
+    )
+}
+
+@Composable
 private fun LogoBox(
     iata: String?,
     name: String?,
     logo: Bitmap?,
-    maxHeightDp: Int,
 ) {
-    val (boxW, boxH) = logoBoxDp(logo, maxHeightDp)
+    val box = WidgetLogo.sizeDp
     val initials = airlineInitials(iata, name)
     Box(
-        modifier = GlanceModifier.size(width = boxW.dp, height = boxH.dp),
+        modifier = GlanceModifier.size(width = box.dp, height = box.dp),
         contentAlignment = Alignment.TopEnd,
     ) {
         if (logo != null) {
@@ -502,14 +561,14 @@ private fun LogoBox(
                 provider = ImageProvider(logo),
                 contentDescription = name ?: iata ?: "logo",
                 contentScale = ContentScale.Fit,
-                modifier = GlanceModifier.size(width = boxW.dp, height = boxH.dp),
+                modifier = GlanceModifier.size(width = box.dp, height = box.dp),
             )
         } else {
             Text(
                 initials,
                 style = TextStyle(
                     color = WidgetColors.accent,
-                    fontSize = if (boxH >= 48) 18.sp else 16.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
@@ -517,37 +576,22 @@ private fun LogoBox(
     }
 }
 
-/** Fit inside maxHeight; width follows aspect. Glance Image dies at 0px — never shrink below 24. */
-private fun logoBoxDp(logo: Bitmap?, maxHeightDp: Int): Pair<Int, Int> {
-    val maxW = (maxHeightDp * 2).coerceAtMost(160)
-    if (logo == null) return maxHeightDp to maxHeightDp
-    val bw = logo.width.coerceAtLeast(1)
-    val bh = logo.height.coerceAtLeast(1)
-    val aspect = bw.toFloat() / bh.toFloat()
-    var height = maxHeightDp
-    var width = (height * aspect).toInt().coerceAtLeast(1)
-    if (width > maxW) {
-        width = maxW
-        height = (width / aspect).toInt().coerceAtLeast(1)
-    }
-    return width.coerceAtLeast(24) to height.coerceAtLeast(24)
-}
-
 private val logoMemory = ConcurrentHashMap<String, Bitmap>()
 
 internal suspend fun loadAirlineLogo(context: Context, iata: String?): Bitmap? {
     val code = iata?.trim()?.uppercase().orEmpty()
     val url = airlineLogoUrl(code) ?: return null
-    logoMemory[code]?.takeIf { !it.isRecycled }?.let { return it }
+    val cacheKey = "${code}_mark"
+    logoMemory[cacheKey]?.takeIf { !it.isRecycled }?.let { return it }
     return withContext(Dispatchers.IO) {
-        logoMemory[code]?.takeIf { !it.isRecycled }?.let { return@withContext it }
-        val disk = File(context.cacheDir, "airline_logos/$code.png")
+        logoMemory[cacheKey]?.takeIf { !it.isRecycled }?.let { return@withContext it }
+        val disk = File(context.cacheDir, "airline_logos/${code}_mark.png")
         readLogoFile(disk)?.let { cached ->
-            logoMemory[code] = cached
+            logoMemory[cacheKey] = cached
             return@withContext cached
         }
         val downloaded = downloadAirlineLogo(url) ?: return@withContext null
-        logoMemory[code] = downloaded
+        logoMemory[cacheKey] = downloaded
         runCatching {
             disk.parentFile?.mkdirs()
             disk.outputStream().use { out -> downloaded.compress(Bitmap.CompressFormat.PNG, 100, out) }
@@ -581,7 +625,7 @@ private fun downloadAirlineLogo(url: String): Bitmap? = runCatching {
 }.getOrNull()
 
 private fun prepareGlanceBitmap(src: Bitmap): Bitmap {
-    val max = 220
+    val max = 320
     val longest = maxOf(src.width, src.height).coerceAtLeast(1)
     val scaled = if (longest > max) {
         val factor = max.toFloat() / longest
@@ -710,18 +754,18 @@ internal fun aircraftLine(f: FlightEntity): String? {
 internal fun statusColorRes(status: FlightStatus): Int = chipColorRes(status)
 
 /**
- * Glance first. RemoteViews full card is painted first so a pin crash
- * never leaves the launcher on an empty stub.
+ * RemoteViews is the only paint on ticks. Glance provideGlance ends by
+ * writing the same XML card so the two paths cannot fight.
  */
 open class FlightWidgetProvider : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = FlightBuddyWidget()
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        runCatching { super.onUpdate(context, appWidgetManager, appWidgetIds) }
+            .onFailure { Log.e("FlightBuddy/Widget", "Glance onUpdate failed", it) }
         appWidgetIds.forEach { id ->
             runCatching { RemoteFlightWidget.update(context, appWidgetManager, id) }
         }
-        runCatching { super.onUpdate(context, appWidgetManager, appWidgetIds) }
-            .onFailure { Log.e("FlightBuddy/Widget", "Glance onUpdate failed", it) }
     }
 
     override fun onAppWidgetOptionsChanged(
@@ -730,9 +774,9 @@ open class FlightWidgetProvider : GlanceAppWidgetReceiver() {
         appWidgetId: Int,
         newOptions: Bundle,
     ) {
-        runCatching { RemoteFlightWidget.update(context, appWidgetManager, appWidgetId) }
         runCatching { super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions) }
             .onFailure { Log.e("FlightBuddy/Widget", "Glance options change failed", it) }
+        runCatching { RemoteFlightWidget.update(context, appWidgetManager, appWidgetId) }
     }
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
@@ -753,30 +797,11 @@ class WidgetUpdater(
     private val context: Context,
     private val liveNotif: LiveFlightNotification,
 ) : KoinComponent {
+    @Suppress("UNUSED_PARAMETER")
     suspend fun updateAll(changedFlightIds: Set<String> = emptySet()) {
+        // Same XML card every tick — do not also call Glance updateAll (size/metrics fight).
         RemoteFlightWidget.updateAll(context)
-        val manager = GlanceAppWidgetManager(context)
-        runCatching { updateClass(manager, FlightBuddyWidget(), FlightBuddyWidget::class.java, changedFlightIds) }
-            .onFailure { Log.e("FlightBuddy/Widget", "Glance 4x2 update failed", it) }
-        runCatching { updateClass(manager, FlightBuddyWidget5x2(), FlightBuddyWidget5x2::class.java, changedFlightIds) }
-            .onFailure { Log.e("FlightBuddy/Widget", "Glance 5x2 update failed", it) }
         runCatching { liveNotif.publishUpdate() }
-    }
-
-    private suspend fun updateClass(
-        manager: GlanceAppWidgetManager,
-        widget: GlanceAppWidget,
-        clazz: Class<out GlanceAppWidget>,
-        changedFlightIds: Set<String>,
-    ) {
-        manager.getGlanceIds(clazz).forEach { id ->
-            val state = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
-            val appWidgetId = runCatching { manager.getAppWidgetId(id) }.getOrNull()
-            val pinned = state[WIDGET_FLIGHT_ID] ?: appWidgetId?.let { WidgetPins.get(context, it) }
-            if (changedFlightIds.isEmpty() || pinned == null || pinned in changedFlightIds) {
-                widget.update(context, id)
-            }
-        }
     }
 
     suspend fun pinFlight(glanceId: GlanceId, flightId: String, appWidgetId: Int? = null) {
@@ -789,7 +814,6 @@ class WidgetUpdater(
         if (widgetId != null) {
             RemoteFlightWidget.update(context, widgetId)
         }
-        updateAll()
     }
 
     /** Configure-time bind: [WidgetPins] + RemoteViews first; Glance id may not exist yet. */

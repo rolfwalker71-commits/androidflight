@@ -121,6 +121,10 @@ fun airlineFlightLine(f: FlightEntity): String {
     return if (airline.isNotEmpty()) "$airline · $number" else number
 }
 
+/** `SWISS · LX 64 (Vor 1 Min. aktualisiert)` — freshness on the flight-number line. */
+fun airlineFlightWithFreshness(airlineFlight: String, freshness: String?): String =
+    if (freshness.isNullOrBlank()) airlineFlight else "$airlineFlight ($freshness)"
+
 fun cityRouteTitle(context: Context, f: FlightEntity): String {
     val from = f.fromCity?.trim()?.takeIf { it.isNotEmpty() } ?: f.fromIata?.trim().orEmpty()
     val to = f.toCity?.trim()?.takeIf { it.isNotEmpty() } ?: f.toIata?.trim().orEmpty()

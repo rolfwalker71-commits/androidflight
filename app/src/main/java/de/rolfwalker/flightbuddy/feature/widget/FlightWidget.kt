@@ -77,15 +77,21 @@ private object WidgetPad {
     val roomyHorizontal = 10.dp
     val top = 6.dp
     val bottom = 6.dp
-    val afterHeaderCompact = 0.dp
-    val afterHeader = 1.dp
-    val afterTitleCompact = 1.dp
-    val afterTitle = 2.dp
+    val afterTitleCompact = 0.dp
+    val afterTitle = 0.dp
     val afterDate = 1.dp
     val beforeBarCompact = 2.dp
     val beforeBar = 3.dp
     val section = 2.dp
     val hint = 2.dp
+}
+
+/** Wide wordmark box (4×2 first). 5×2 uses the same sizes, only the card is wider. */
+private object WidgetLogo {
+    const val compactWidth = 100
+    const val compactHeight = 34
+    const val roomyWidth = 132
+    const val roomyHeight = 42
 }
 
 private object WidgetColors {
@@ -207,20 +213,17 @@ private fun WidgetBody(context: Context, flight: FlightEntity?, iata: String?, l
             verticalAlignment = Alignment.Top,
             modifier = GlanceModifier.fillMaxWidth(),
         ) {
-            LogoBox(iata, flight.airlineName, logo, if (compact) 52 else 72)
+            LogoBox(
+                iata,
+                flight.airlineName,
+                logo,
+                if (compact) WidgetLogo.compactWidth else WidgetLogo.roomyWidth,
+                if (compact) WidgetLogo.compactHeight else WidgetLogo.roomyHeight,
+            )
             Spacer(GlanceModifier.defaultWeight())
             StatusPill(context, flight)
         }
-        Spacer(GlanceModifier.height(if (compact) WidgetPad.afterHeaderCompact else WidgetPad.afterHeader))
-        Text(
-            headerLine(flight),
-            style = TextStyle(
-                color = WidgetColors.primaryText,
-                fontSize = numberSize,
-                fontWeight = FontWeight.Bold,
-            ),
-            maxLines = 1,
-        )
+        FlightNumberLine(flight, numberSize)
         Spacer(GlanceModifier.height(if (compact) WidgetPad.afterTitleCompact else WidgetPad.afterTitle))
         if (roomy) {
             Text(
@@ -447,29 +450,77 @@ private fun StatusPill(context: Context, flight: FlightEntity) {
 }
 
 @Composable
-private fun LogoBox(iata: String?, name: String?, logo: Bitmap?, boxDp: Int) {
+private fun FlightNumberLine(flight: FlightEntity, routeSize: androidx.compose.ui.unit.TextUnit) {
+    val number = displayFlightNumber(flight.flightNumber)
+    val route = " - ${routeLine(flight)}"
+    val numberSize = (routeSize.value + 2f).sp
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text(
+            number,
+            style = TextStyle(
+                color = WidgetColors.primaryText,
+                fontSize = numberSize,
+                fontWeight = FontWeight.Bold,
+            ),
+            maxLines = 1,
+        )
+        Text(
+            route,
+            style = TextStyle(
+                color = WidgetColors.primaryText,
+                fontSize = routeSize,
+                fontWeight = FontWeight.Normal,
+            ),
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun LogoBox(
+    iata: String?,
+    name: String?,
+    logo: Bitmap?,
+    maxWidthDp: Int,
+    maxHeightDp: Int,
+) {
+    val (boxW, boxH) = logoBoxDp(logo, maxWidthDp, maxHeightDp)
     val initials = airlineInitials(iata, name)
     Box(
-        modifier = GlanceModifier.size(boxDp.dp),
-        contentAlignment = Alignment.Center,
+        modifier = GlanceModifier.size(width = boxW.dp, height = boxH.dp),
+        contentAlignment = Alignment.CenterStart,
     ) {
         if (logo != null) {
             Image(
                 provider = ImageProvider(logo),
                 contentDescription = name ?: iata ?: "logo",
                 contentScale = ContentScale.Fit,
-                modifier = GlanceModifier.size(boxDp.dp),
+                modifier = GlanceModifier.size(width = boxW.dp, height = boxH.dp),
             )
         } else {
             Text(
                 initials,
                 style = TextStyle(
                     color = WidgetColors.accent,
-                    fontSize = if (boxDp >= 64) 20.sp else 16.sp,
+                    fontSize = if (boxH >= 36) 20.sp else 16.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
         }
+    }
+}
+
+private fun logoBoxDp(logo: Bitmap?, maxWidthDp: Int, maxHeightDp: Int): Pair<Int, Int> {
+    if (logo == null) return maxHeightDp to maxHeightDp
+    val aspect = logo.width.toFloat() / logo.height.coerceAtLeast(1).toFloat()
+    return if (aspect >= 1f) {
+        val width = maxWidthDp
+        val height = (maxWidthDp / aspect).toInt().coerceIn(20, maxHeightDp)
+        width to height
+    } else {
+        val height = maxHeightDp
+        val width = (maxHeightDp * aspect).toInt().coerceIn(20, maxWidthDp)
+        width to height
     }
 }
 
@@ -481,7 +532,7 @@ private suspend fun loadAirlineLogo(context: Context, iata: String?): Bitmap? {
     logoMemory[code]?.takeIf { !it.isRecycled }?.let { return it }
     return withContext(Dispatchers.IO) {
         logoMemory[code]?.takeIf { !it.isRecycled }?.let { return@withContext it }
-        val disk = File(context.cacheDir, "airline_logos/$code.png")
+        val disk = File(context.cacheDir, "airline_logos_v2/$code.png")
         readLogoFile(disk)?.let { cached ->
             logoMemory[code] = cached
             return@withContext cached
@@ -521,24 +572,64 @@ private fun downloadAirlineLogo(url: String): Bitmap? = runCatching {
 }.getOrNull()
 
 private fun prepareGlanceBitmap(src: Bitmap): Bitmap {
+    val trimmed = trimLogoPadding(src)
     val max = 220
-    val longest = maxOf(src.width, src.height).coerceAtLeast(1)
+    val longest = maxOf(trimmed.width, trimmed.height).coerceAtLeast(1)
     val scaled = if (longest > max) {
         val factor = max.toFloat() / longest
         Bitmap.createScaledBitmap(
-            src,
-            (src.width * factor).toInt().coerceAtLeast(1),
-            (src.height * factor).toInt().coerceAtLeast(1),
+            trimmed,
+            (trimmed.width * factor).toInt().coerceAtLeast(1),
+            (trimmed.height * factor).toInt().coerceAtLeast(1),
             true,
         )
     } else {
-        src
+        trimmed
     }
     return if (scaled.config == Bitmap.Config.ARGB_8888) {
         scaled
     } else {
         scaled.copy(Bitmap.Config.ARGB_8888, false) ?: scaled
     }
+}
+
+/** Drop avs.io square padding so wordmarks fill a wide, short box. */
+private fun trimLogoPadding(src: Bitmap): Bitmap {
+    val w = src.width
+    val h = src.height
+    if (w <= 4 || h <= 4) return src
+    val pixels = IntArray(w * h)
+    src.getPixels(pixels, 0, w, 0, 0, w, h)
+    var minX = w
+    var minY = h
+    var maxX = -1
+    var maxY = -1
+    for (y in 0 until h) {
+        val row = y * w
+        for (x in 0 until w) {
+            val c = pixels[row + x]
+            val a = (c ushr 24) and 0xFF
+            if (a < 16) continue
+            val r = (c ushr 16) and 0xFF
+            val g = (c ushr 8) and 0xFF
+            val b = c and 0xFF
+            if (r > 245 && g > 245 && b > 245) continue
+            if (x < minX) minX = x
+            if (y < minY) minY = y
+            if (x > maxX) maxX = x
+            if (y > maxY) maxY = y
+        }
+    }
+    if (maxX < minX) return src
+    val pad = 2
+    val left = (minX - pad).coerceAtLeast(0)
+    val top = (minY - pad).coerceAtLeast(0)
+    val right = (maxX + pad).coerceAtMost(w - 1)
+    val bottom = (maxY + pad).coerceAtMost(h - 1)
+    val cw = right - left + 1
+    val ch = bottom - top + 1
+    if (cw >= w - 2 && ch >= h - 2) return src
+    return Bitmap.createBitmap(src, left, top, cw, ch)
 }
 
 private fun statusColor(f: FlightEntity) = when (f.status) {
@@ -626,12 +717,6 @@ private fun routeLine(f: FlightEntity): String {
     val from = f.fromIata?.trim().orEmpty().ifBlank { "––" }
     val to = f.toIata?.trim().orEmpty().ifBlank { "––" }
     return "$from → $to"
-}
-
-/** `LX 64 - ZRH → MIA` — logo carries the airline; IATA as stored (ZRH, not ZHR). */
-private fun headerLine(f: FlightEntity): String {
-    val number = displayFlightNumber(f.flightNumber)
-    return "$number - ${routeLine(f)}"
 }
 
 @Composable

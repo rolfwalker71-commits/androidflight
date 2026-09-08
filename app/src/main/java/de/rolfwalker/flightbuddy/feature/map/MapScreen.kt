@@ -19,7 +19,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.location.LocationManager
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.NearMe
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -139,7 +143,10 @@ private class FlightMapState {
         }
     }
     var host: MapView? = null
+    var locateId: Long = 0L
 }
+
+data class MapLocateRequest(val lat: Double, val lon: Double, val id: Long = System.currentTimeMillis())
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -152,6 +159,7 @@ fun FlightMapView(
     onViewport: ((Double, Double, Double, Double) -> Unit)? = null,
     tracks: Map<String, List<LatLon>> = emptyMap(),
     frameFlightId: String? = null,
+    locate: MapLocateRequest? = null,
 ) {
     val context = LocalContext.current
     remember { MapLibre.getInstance(context.applicationContext) }
@@ -200,6 +208,10 @@ fun FlightMapView(
                 view.getMapAsync { map ->
                     state.map = map
                     applyBasemap(map, view, style, flights, tracks)
+                    if (locate != null && state.locateId != locate.id) {
+                        state.locateId = locate.id
+                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(locate.lat, locate.lon), 10.0))
+                    }
                     if (state.cameraKey != cameraKey) {
                         state.cameraKey = cameraKey
                         updateCamera(map, state, flights, tracks, followId, frameFlightId)
@@ -661,6 +673,17 @@ fun HomeHeroMap(flights: List<FlightEntity>, mapStyle: MapStyleId, onOpen: (Stri
 fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
     val state by vm.state.collectAsState()
     val selected = state.flights.find { it.id == state.selectedId }
+    val context = LocalContext.current
+    var locate by remember { mutableStateOf<MapLocateRequest?>(null) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.any { it }) locate = lastKnownFix(context)
+    }
+    val goToMe = {
+        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) locate = lastKnownFix(context)
+        else permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
     Row(Modifier.fillMaxSize()) {
         if (tablet) {
             LazyColumn(Modifier.fillMaxHeight().weight(0.38f).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -696,10 +719,12 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
                 modifier = Modifier.fillMaxSize(),
                 onViewport = { a, b, c, d -> vm.loadTraffic(a, b, c, d) },
                 tracks = state.tracks,
+                locate = locate,
             )
             Row(Modifier.align(Alignment.TopEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = state.trafficOn, onClick = { vm.setTraffic(!state.trafficOn) }, label = { Text(stringResource(R.string.map_viewport_traffic)) })
                 IconButton(onClick = { vm.toggleFollow() }) { Icon(Icons.Outlined.NearMe, contentDescription = stringResource(R.string.map_follow)) }
+                IconButton(onClick = goToMe) { Icon(Icons.Outlined.MyLocation, contentDescription = stringResource(R.string.map_locate)) }
             }
             if (state.trafficOn) {
                 val caption = when {
@@ -741,4 +766,13 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
             }
         }
     }
+}
+
+@SuppressLint("MissingPermission")
+private fun lastKnownFix(context: android.content.Context): MapLocateRequest? {
+    val lm = context.getSystemService(LocationManager::class.java) ?: return null
+    val loc = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+        .firstNotNullOfOrNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+        ?: return null
+    return MapLocateRequest(loc.latitude, loc.longitude)
 }

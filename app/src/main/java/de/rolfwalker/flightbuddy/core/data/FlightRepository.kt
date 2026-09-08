@@ -44,6 +44,7 @@ class FlightRepository(
     fun observePositions(flightId: String) = positions.observeForFlight(flightId)
     fun observeAllPositions() = positions.observeAll()
 
+    suspend fun getAirport(iata: String) = airports.get(iata)
     suspend fun getFlight(id: String) = flights.get(id)
     suspend fun listFlights() = flights.listAll()
     suspend fun listActive() = flights.listActive()
@@ -113,10 +114,10 @@ class FlightRepository(
             toIata = result.toIata,
             fromCity = result.fromCity,
             toCity = result.toCity,
-            fromCountry = airports.get(result.fromIata.orEmpty())?.country,
-            toCountry = airports.get(result.toIata.orEmpty())?.country,
-            fromTimezone = result.fromTimezone,
-            toTimezone = result.toTimezone,
+            fromCountry = result.fromCountry ?: airports.get(result.fromIata.orEmpty())?.country,
+            toCountry = result.toCountry ?: airports.get(result.toIata.orEmpty())?.country,
+            fromTimezone = result.fromTimezone ?: airports.get(result.fromIata.orEmpty())?.timezone,
+            toTimezone = result.toTimezone ?: airports.get(result.toIata.orEmpty())?.timezone,
             fromLat = result.fromLat ?: airports.get(result.fromIata.orEmpty())?.lat,
             fromLon = result.fromLon ?: airports.get(result.fromIata.orEmpty())?.lon,
             toLat = result.toLat ?: airports.get(result.toIata.orEmpty())?.lat,
@@ -133,7 +134,13 @@ class FlightRepository(
             arrivalGate = result.arrivalGate,
             arrivalTerminal = result.arrivalTerminal,
             baggageBelt = result.baggageBelt,
+            checkInDesk = result.checkInDesk,
             delayMinutes = result.delayMinutes,
+            arrivalDelayMinutes = result.arrivalDelayMinutes,
+            codeshares = result.codeshares,
+            isCargo = result.isCargo,
+            runwayDepAt = result.runwayDepAt,
+            runwayArrAt = result.runwayArrAt,
             aircraftType = result.aircraftType,
             registration = result.registration,
             icao24 = result.icao24,
@@ -172,18 +179,29 @@ class FlightRepository(
         flights.delete(id)
     }
 
-    suspend fun upsertAirport(iata: String, city: String?, tz: String?, lat: Double?, lon: Double?) {
+    suspend fun upsertAirport(
+        iata: String,
+        city: String?,
+        tz: String?,
+        lat: Double?,
+        lon: Double?,
+        icao: String? = null,
+        name: String? = null,
+        country: String? = null,
+        elevationFt: Int? = null,
+    ) {
         val existing = airports.get(iata)
         airports.upsert(
             AirportEntity(
                 iata = iata,
-                icao = existing?.icao,
-                name = existing?.name,
+                icao = icao ?: existing?.icao,
+                name = name ?: existing?.name,
                 city = city ?: existing?.city,
-                country = existing?.country,
+                country = country ?: existing?.country,
                 timezone = tz ?: existing?.timezone,
                 lat = lat ?: existing?.lat,
                 lon = lon ?: existing?.lon,
+                elevationFt = elevationFt ?: existing?.elevationFt,
             ),
         )
     }

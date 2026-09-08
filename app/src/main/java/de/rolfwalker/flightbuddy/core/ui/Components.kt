@@ -70,6 +70,7 @@ fun StatusBadge(status: FlightStatus, delayMinutes: Int? = null) {
         FlightStatus.CANCELLED, FlightStatus.DIVERTED -> Triple(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, stringResource(if (status == FlightStatus.CANCELLED) R.string.status_cancelled else R.string.status_diverted))
         FlightStatus.LANDED -> Triple(Success.copy(alpha = 0.18f), Success, stringResource(R.string.status_landed))
         FlightStatus.BOARDING -> Triple(Success.copy(alpha = 0.18f), Success, stringResource(R.string.status_boarding))
+        FlightStatus.GATE_CLOSED -> Triple(Warning.copy(alpha = 0.2f), Warning, stringResource(R.string.status_gate_closed))
         FlightStatus.SCHEDULED -> Triple(Success.copy(alpha = 0.18f), Success, stringResource(R.string.status_on_time))
         FlightStatus.UNKNOWN -> Triple(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_unknown))
     }

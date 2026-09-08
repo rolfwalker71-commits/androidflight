@@ -124,6 +124,15 @@ class SettingsViewModel(
         }
     }
 
+    fun trackObject(callsign: String, icao24: String?, label: String?) {
+        val cs = callsign.trim()
+        if (cs.isBlank()) return
+        viewModelScope.launch {
+            org.koin.java.KoinJavaComponent.get<FlightRepository>(FlightRepository::class.java)
+                .trackObject(icao24?.trim()?.ifBlank { null }, cs, label?.trim()?.ifBlank { null })
+        }
+    }
+
     fun exportTo(context: Context, uri: Uri) {
         if (_backupBusy.value) return
         viewModelScope.launch {

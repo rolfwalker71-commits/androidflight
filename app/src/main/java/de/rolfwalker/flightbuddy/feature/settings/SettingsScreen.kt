@@ -30,6 +30,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -50,6 +53,7 @@ import de.rolfwalker.flightbuddy.core.model.Units
 import de.rolfwalker.flightbuddy.core.ui.TonalCard
 import de.rolfwalker.flightbuddy.feature.map.FlightMapView
 import de.rolfwalker.flightbuddy.feature.map.labelRes
+import de.rolfwalker.flightbuddy.tracking.TrackerController
 
 @Composable
 fun SettingsScreen(
@@ -127,6 +131,23 @@ fun SettingsScreen(
                     TextButton(onClick = { vm.untrack(o.id) }) { Text(stringResource(R.string.map_untrack)) }
                 }
             }
+            var callsign by remember { mutableStateOf("") }
+            var hex by remember { mutableStateOf("") }
+            var label by remember { mutableStateOf("") }
+            OutlinedTextField(callsign, { callsign = it }, label = { Text(stringResource(R.string.map_object_callsign)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(hex, { hex = it }, label = { Text(stringResource(R.string.map_object_icao)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(label, { label = it }, label = { Text(stringResource(R.string.map_object_label)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            FilledTonalButton(
+                onClick = {
+                    vm.trackObject(callsign, hex.ifBlank { null }, label.ifBlank { null })
+                    callsign = ""
+                    hex = ""
+                    label = ""
+                    TrackerController.sync(context)
+                },
+                enabled = callsign.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) { Text(stringResource(R.string.map_object_add)) }
             Text(stringResource(R.string.map_object_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 

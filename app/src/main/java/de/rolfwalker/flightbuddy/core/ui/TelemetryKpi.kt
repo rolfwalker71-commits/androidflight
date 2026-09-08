@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.NorthEast
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Terrain
@@ -42,14 +43,20 @@ fun flightTelemetryKpis(
     remainingNm: Double?,
     language: String,
     units: Units,
+    verticalRateFpm: Double? = null,
 ): List<TelemetryKpi> {
     val altitude = formatAltitudePair(altitudeFt, language)
     val speed = formatSpeedPair(velocityKts, language)
-    return listOf(
+    val vrate = verticalRateFpm?.takeIf { it.isFinite() }?.let { fpm ->
+        val climb = if (fpm > 80) stringResource(R.string.flight_climb) else if (fpm < -80) stringResource(R.string.flight_descent) else stringResource(R.string.flight_level)
+        String.format(java.util.Locale.US, "%+.0f fpm", fpm) to climb
+    }
+    return listOfNotNull(
         TelemetryKpi(Icons.Outlined.Terrain, stringResource(R.string.flight_altitude), altitude.first, altitude.second),
         TelemetryKpi(Icons.Outlined.Speed, stringResource(R.string.flight_speed), speed.first, speed.second),
         TelemetryKpi(Icons.Outlined.Explore, stringResource(R.string.flight_heading), formatHeading(heading, language)),
         TelemetryKpi(Icons.Outlined.Route, stringResource(R.string.flight_remaining), formatDistanceNm(remainingNm, language, units)),
+        vrate?.let { TelemetryKpi(Icons.Outlined.NorthEast, stringResource(R.string.flight_vrate), it.first, it.second) },
     )
 }
 

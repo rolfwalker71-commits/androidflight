@@ -46,10 +46,13 @@ import de.rolfwalker.flightbuddy.core.data.toPollInput
 import de.rolfwalker.flightbuddy.core.domain.LIVE_FIX_STALE_MS
 import de.rolfwalker.flightbuddy.core.domain.displayFlightNumber
 import de.rolfwalker.flightbuddy.core.domain.flightProgress
+import de.rolfwalker.flightbuddy.core.domain.arrZone
+import de.rolfwalker.flightbuddy.core.domain.depZone
 import de.rolfwalker.flightbuddy.core.domain.haversineNm
 import de.rolfwalker.flightbuddy.core.domain.interpolateAirbornePosition
 import de.rolfwalker.flightbuddy.core.domain.isEmergencySquawk
 import de.rolfwalker.flightbuddy.core.domain.isLiveStatus
+import de.rolfwalker.flightbuddy.core.domain.wetLeaseLine
 import de.rolfwalker.flightbuddy.core.model.LatLon
 import de.rolfwalker.flightbuddy.core.model.Units
 import de.rolfwalker.flightbuddy.core.ui.AirlineLogo
@@ -142,15 +145,26 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                                 )
                             }
                         }
-                        if (tablet && photo != null) {
+                        if (photo != null) {
                             AsyncImage(
                                 photo!!.url,
                                 contentDescription = stringResource(R.string.aircraft_photo_alt, row.registration.orEmpty()),
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.weight(1f).height(96.dp).padding(horizontal = 8.dp).clip(MaterialTheme.shapes.medium),
+                                modifier = Modifier
+                                    .then(if (tablet) Modifier.weight(1f).height(96.dp) else Modifier.size(72.dp, 52.dp))
+                                    .padding(horizontal = 8.dp)
+                                    .clip(MaterialTheme.shapes.large),
                             )
                         }
                         AirlineLogo(row.airlineIata, row.airlineName, if (tablet) 65 else 43)
+                    }
+                    wetLeaseLine(row.paintedAs, row.operatingAs)?.let { op ->
+                        Text(
+                            stringResource(R.string.insight_operated_by, op),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
                     }
 
                     Spacer(Modifier.height(16.dp))
@@ -161,7 +175,7 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = if (tablet) 36.sp else 30.sp),
                             )
                             Text(row.fromCity.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            standLine(row.gate, row.terminal)?.let {
+                            standLine(row.gate, row.terminal, row.checkInDesk)?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -171,7 +185,10 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = if (tablet) 36.sp else 30.sp),
                             )
                             Text(row.toCity.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            standLine(row.arrivalGate, row.arrivalTerminal)?.let {
+                            listOfNotNull(
+                                standLine(row.arrivalGate, row.arrivalTerminal),
+                                row.baggageBelt?.let { stringResource(R.string.widget_baggage, it) },
+                            ).takeIf { it.isNotEmpty() }?.joinToString(" · ")?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -202,6 +219,8 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                         status = row.status,
                         language = language,
                         variant = ClockVariant.DETAIL,
+                        depZone = row.depZone(),
+                        arrZone = row.arrZone(),
                     )
 
                     Spacer(Modifier.height(8.dp))
@@ -213,9 +232,12 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                             remainingNm = remaining,
                             language = language,
                             units = units,
+                            verticalRateFpm = row.lastVerticalRateFpm,
                         ),
                         columns = if (tablet) 4 else 2,
                     )
+                    Spacer(Modifier.height(8.dp))
+                    SourceChip(row.lastStatusSource, interp.estimated)
 
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -233,6 +255,8 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                     }
                 }
             }
+
+            FlightOpsCards(row, units, language)
 
             TonalCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -272,10 +296,11 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
 }
 
 @Composable
-private fun standLine(gate: String?, terminal: String?): String? {
+private fun standLine(gate: String?, terminal: String?, checkIn: String? = null): String? {
     val parts = listOfNotNull(
         gate?.let { stringResource(R.string.flight_gate) + " " + it },
         terminal?.let { stringResource(R.string.flight_terminal) + " " + it },
+        checkIn?.let { stringResource(R.string.flight_checkin) + " " + it },
     )
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }

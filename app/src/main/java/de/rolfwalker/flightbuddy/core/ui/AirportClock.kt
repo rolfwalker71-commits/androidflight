@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -27,7 +28,7 @@ import java.time.ZoneId
 /**
  * Two-column ABFLUG / ANKUNFT clocks with shared row heights (PWA grid).
  * Both columns always render GEPLANT + EFFEKTIV so those rows stay aligned.
- * Visible times use the phone’s [ZoneId.systemDefault], not airport TZ.
+ * Visible times use airport local zones when known, otherwise the phone zone.
  */
 @Composable
 fun AirportClockPair(
@@ -41,13 +42,14 @@ fun AirportClockPair(
     language: String,
     variant: ClockVariant = ClockVariant.COMPACT,
     modifier: Modifier = Modifier,
+    depZone: ZoneId = DateTimeFmt.deviceZone(),
+    arrZone: ZoneId = DateTimeFmt.deviceZone(),
 ) {
-    val zone = DateTimeFmt.deviceZone()
     val dep = clockColumn(
         scheduled = depScheduled,
         estimated = depEstimated,
         actual = depActual,
-        zone = zone,
+        zone = depZone,
         status = status,
         role = ClockRole.DEP,
     )
@@ -55,7 +57,7 @@ fun AirportClockPair(
         scheduled = arrScheduled,
         estimated = arrEstimated,
         actual = arrActual,
-        zone = zone,
+        zone = arrZone,
         status = status,
         role = ClockRole.ARR,
     )
@@ -113,6 +115,13 @@ fun AirportClockPair(
         ClockGridRow {
             ClockDate(dep.effective ?: dep.planned, dep.zone, TextAlign.Start, muted, Modifier.weight(1f))
             ClockDate(arr.effective ?: arr.planned, arr.zone, TextAlign.End, muted, Modifier.weight(1f))
+        }
+        val device = DateTimeFmt.deviceZone()
+        if (dep.zone != device || arr.zone != device) {
+            ClockGridRow(Modifier.padding(top = 6.dp)) {
+                DeviceTimeHint(dep.effective ?: dep.planned, dep.zone, device, TextAlign.Start, muted, Modifier.weight(1f))
+                DeviceTimeHint(arr.effective ?: arr.planned, arr.zone, device, TextAlign.End, muted, Modifier.weight(1f))
+            }
         }
     }
 }
@@ -232,7 +241,7 @@ private fun ClockFace(
     modifier: Modifier = Modifier,
 ) {
     val time = DateTimeFmt.time(at, zone)
-    val offset = if (at != null) DateTimeFmt.offsetLabel(zone) else null
+    val offset = if (at != null) DateTimeFmt.offsetLabel(zone, at) else null
     val offsetStyle = MaterialTheme.typography.labelSmall.copy(
         fontSize = (timeStyle.fontSize.value * 0.55f).coerceAtLeast(10f).sp,
         fontWeight = FontWeight.Normal,
@@ -288,6 +297,28 @@ private fun effectiveLabel(kind: EffectiveKind?): String {
         null -> null
     }
     return if (q != null) "$eff • $q".uppercase() else eff.uppercase()
+}
+
+@Composable
+private fun DeviceTimeHint(
+    at: Long?,
+    airport: ZoneId,
+    device: ZoneId,
+    textAlign: TextAlign,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    if (at == null || airport == device) {
+        Spacer(modifier)
+        return
+    }
+    Text(
+        stringResource(R.string.flight_your_time, DateTimeFmt.time(at, device)),
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        textAlign = textAlign,
+        modifier = modifier.fillMaxWidth(),
+    )
 }
 
 enum class ClockRole { DEP, ARR }

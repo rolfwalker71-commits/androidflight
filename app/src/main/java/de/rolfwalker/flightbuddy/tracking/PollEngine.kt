@@ -41,6 +41,7 @@ class PollEngine(
     private val keysStore: KeysStore,
     private val prefsStore: PrefsStore,
     private val alerts: AlertDispatcher,
+    private val insights: InsightEngine,
 ) {
     suspend fun pollDueFlights(forceAllActive: Boolean = false): List<PollOutcome> {
         val now = System.currentTimeMillis()
@@ -100,12 +101,22 @@ class PollEngine(
                         arrivalGate = match.arrivalGate ?: next.arrivalGate,
                         arrivalTerminal = match.arrivalTerminal ?: next.arrivalTerminal,
                         baggageBelt = match.baggageBelt ?: next.baggageBelt,
+                        checkInDesk = match.checkInDesk ?: next.checkInDesk,
                         delayMinutes = match.delayMinutes ?: next.delayMinutes,
+                        arrivalDelayMinutes = match.arrivalDelayMinutes ?: next.arrivalDelayMinutes,
+                        codeshares = match.codeshares ?: next.codeshares,
+                        isCargo = match.isCargo ?: next.isCargo,
                         estimatedDep = match.estimatedDep ?: next.estimatedDep,
                         estimatedArr = match.estimatedArr ?: next.estimatedArr,
                         actualDep = match.actualDep ?: next.actualDep,
                         actualArr = match.actualArr ?: next.actualArr,
+                        runwayDepAt = match.runwayDepAt ?: next.runwayDepAt,
+                        runwayArrAt = match.runwayArrAt ?: next.runwayArrAt,
                         scheduledArr = next.scheduledArr ?: match.scheduledArr,
+                        fromTimezone = match.fromTimezone ?: next.fromTimezone,
+                        toTimezone = match.toTimezone ?: next.toTimezone,
+                        fromLat = next.fromLat ?: match.fromLat,
+                        fromLon = next.fromLon ?: match.fromLon,
                         toIata = if (destChanged) match.toIata else next.toIata,
                         toCity = if (destChanged) match.toCity else next.toCity,
                         toLat = match.toLat ?: next.toLat,
@@ -141,7 +152,8 @@ class PollEngine(
                     next.id,
                     LiveFix(
                         lat = state.lat, lon = state.lon, altitudeFt = state.altitudeFt,
-                        velocityKts = state.velocityKts, heading = state.heading, onGround = state.onGround,
+                        velocityKts = state.velocityKts, heading = state.heading,
+                        verticalRateFpm = state.verticalRateFpm, onGround = state.onGround,
                         icao24 = state.icao24, callsign = state.callsign, squawk = squawk, source = "opensky",
                     ),
                 )
@@ -154,6 +166,7 @@ class PollEngine(
                     lastAltitudeFt = state.altitudeFt,
                     lastVelocityKts = state.velocityKts,
                     lastHeading = state.heading,
+                    lastVerticalRateFpm = state.verticalRateFpm ?: next.lastVerticalRateFpm,
                     lastOnGround = state.onGround,
                     lastPositionAt = System.currentTimeMillis(),
                     lastSquawk = squawk ?: next.lastSquawk,
@@ -162,17 +175,19 @@ class PollEngine(
                 gotFix = true
             } else {
                 val live = providers.lookupAeroLive(keys, next.flightNumber, next.scheduledDep.toLocalDate(ZoneOffset.UTC))
-                if (live?.fromLat != null && live.fromLon != null) {
+                val liveLat = live?.liveLat ?: live?.fromLat
+                val liveLon = live?.liveLon ?: live?.fromLon
+                if (liveLat != null && liveLon != null) {
                     persistFix(
                         next.id,
-                        LiveFix(lat = live.fromLat, lon = live.fromLon, source = "aerodatabox", icao24 = live.icao24, callsign = live.callsign),
+                        LiveFix(lat = liveLat, lon = liveLon, source = "aerodatabox", icao24 = live?.icao24, callsign = live?.callsign),
                     )
                     next = next.copy(
                         status = if (!isTerminalStatus(next.status)) FlightStatus.EN_ROUTE else next.status,
-                        lastLat = live.fromLat,
-                        lastLon = live.fromLon,
+                        lastLat = liveLat,
+                        lastLon = liveLon,
                         lastPositionAt = System.currentTimeMillis(),
-                        icao24 = live.icao24 ?: next.icao24,
+                        icao24 = live?.icao24 ?: next.icao24,
                         lastStatusSource = "aerodatabox",
                     )
                     gotFix = true
@@ -190,11 +205,20 @@ class PollEngine(
                         lastAltitudeFt = fr24.altitudeFt,
                         lastVelocityKts = fr24.velocityKts,
                         lastHeading = fr24.heading,
+                        lastVerticalRateFpm = fr24.verticalRateFpm ?: next.lastVerticalRateFpm,
                         lastOnGround = fr24.onGround,
                         lastPositionAt = fr24.observedAt,
                         icao24 = fr24.icao24 ?: next.icao24,
                         callsign = fr24.callsign ?: next.callsign,
+                        lastSquawk = normalizeSquawk(fr24.squawk) ?: next.lastSquawk,
                         lastStatusSource = "fr24",
+                        paintedAs = fr24.paintedAs ?: next.paintedAs,
+                        operatingAs = fr24.operatingAs ?: next.operatingAs,
+                        fr24Id = fr24.fr24Id ?: next.fr24Id,
+                        fr24Eta = fr24.eta ?: next.fr24Eta,
+                        registration = next.registration ?: fr24.registration,
+                        aircraftType = next.aircraftType ?: fr24.aircraftType,
+                        destIataActual = fr24.destIata ?: next.destIataActual,
                     )
                 }
             }
@@ -218,6 +242,7 @@ class PollEngine(
             }
         }
 
+        next = runCatching { insights.enrich(next, keys) }.getOrDefault(next)
         val interval = intervalForFlight(next.toPollInput())
         next = next.copy(
             pollPhase = resolvePollPhase(next.toPollInput()),

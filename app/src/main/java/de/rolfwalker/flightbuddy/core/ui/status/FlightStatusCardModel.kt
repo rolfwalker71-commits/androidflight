@@ -4,6 +4,8 @@ import android.content.Context
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.DateTimeFmt
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
+import de.rolfwalker.flightbuddy.core.domain.arrZone
+import de.rolfwalker.flightbuddy.core.domain.depZone
 import de.rolfwalker.flightbuddy.core.domain.displayFlightNumber
 import de.rolfwalker.flightbuddy.core.domain.flightProgress
 import de.rolfwalker.flightbuddy.core.domain.haversineNm
@@ -79,10 +81,10 @@ fun flightStatusCardModel(
         showRouteIata = showsRouteIata(bar),
         progressMarker = progressMarkerFor(bar, chip),
         progress = bar.percent.coerceIn(0, 100),
-        dep = legClock(f.scheduledDep, f.estimatedDep, f.actualDep, f.delayMinutes, shown),
-        arr = legClock(f.scheduledArr, f.estimatedArr, f.actualArr, null, shown),
+        dep = legClock(f.scheduledDep, f.estimatedDep, f.actualDep, f.delayMinutes, shown, f.depZone()),
+        arr = legClock(f.scheduledArr, f.estimatedArr, f.actualArr, f.arrivalDelayMinutes, shown, f.arrZone()),
         weekday = if (showWeekday) DateTimeFmt.weekdayDate(f.scheduledDep) else null,
-        depStand = standBits(context, f.terminal, f.gate),
+        depStand = standBits(context, f.terminal, f.gate, f.checkInDesk),
         arrStand = arrStandLine(context, f, showBaggage),
     )
 }
@@ -100,6 +102,7 @@ fun flightStatusChip(f: FlightEntity, shown: FlightStatus = displayFlightStatus(
         FlightStatus.DEPARTED,
         FlightStatus.EN_ROUTE,
         FlightStatus.BOARDING,
+        FlightStatus.GATE_CLOSED,
         -> shown
         else -> if (flightIsDelayed(f)) FlightStatus.DELAYED else shown
     }
@@ -185,6 +188,7 @@ fun flightStatusLabel(context: Context, status: FlightStatus): String = when (st
     FlightStatus.EN_ROUTE -> context.getString(R.string.status_en_route)
     FlightStatus.DELAYED -> context.getString(R.string.status_delayed)
     FlightStatus.BOARDING -> context.getString(R.string.status_boarding)
+    FlightStatus.GATE_CLOSED -> context.getString(R.string.status_gate_closed)
     FlightStatus.DEPARTED -> context.getString(R.string.status_departed)
     FlightStatus.LANDED -> context.getString(R.string.status_landed)
     FlightStatus.CANCELLED -> context.getString(R.string.status_cancelled)
@@ -196,10 +200,11 @@ fun flightStatusLabel(context: Context, status: FlightStatus): String = when (st
 fun scheduledUnder(context: Context, planned: String): String =
     context.getString(R.string.widget_scheduled_under, planned)
 
-fun standBits(context: Context, terminal: String?, gate: String?): String? {
+fun standBits(context: Context, terminal: String?, gate: String?, checkIn: String? = null): String? {
     val parts = listOfNotNull(
         terminal?.trim()?.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.flight_terminal) + " " + it },
         gate?.trim()?.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.flight_gate) + " " + it },
+        checkIn?.trim()?.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.flight_checkin) + " " + it },
     )
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
 }
@@ -231,9 +236,9 @@ fun displayFlightStatus(f: FlightEntity, now: Long = System.currentTimeMillis())
         now = now,
     )
 
-fun statusClockOrDash(ms: Long?): String {
+fun statusClockOrDash(ms: Long?, zone: java.time.ZoneId = DateTimeFmt.deviceZone()): String {
     if (ms == null) return "––"
-    return DateTimeFmt.time(ms, DateTimeFmt.deviceZone())
+    return DateTimeFmt.time(ms, zone)
 }
 
 fun routeLine(f: FlightEntity): String {
@@ -269,7 +274,7 @@ fun showsRouteIata(bar: FlightStatusBarState): Boolean =
 fun progressMarkerFor(bar: FlightStatusBarState, chip: FlightStatus): FlightProgressMarker {
     if (bar.kind != FlightStatusBarKind.PREFLIGHT) return FlightProgressMarker.PLANE
     return when (chip) {
-        FlightStatus.BOARDING -> FlightProgressMarker.LUGGAGE
+        FlightStatus.BOARDING, FlightStatus.GATE_CLOSED -> FlightProgressMarker.LUGGAGE
         else -> FlightProgressMarker.SCHEDULE
     }
 }
@@ -464,14 +469,15 @@ private fun legClock(
     actual: Long?,
     delayMinutes: Int?,
     shown: FlightStatus,
+    zone: java.time.ZoneId = DateTimeFmt.deviceZone(),
 ): FlightStatusLegClock {
     val times = resolveLegTimes(scheduled, estimated, actual)
     val delayed = (delayMinutes ?: 0) > 0 ||
         shown == FlightStatus.DELAYED ||
         isLegDelayed(times, shown == FlightStatus.DELAYED)
     return FlightStatusLegClock(
-        effective = statusClockOrDash(times.effective ?: times.planned),
-        scheduled = statusClockOrDash(times.planned),
+        effective = statusClockOrDash(times.effective ?: times.planned, zone),
+        scheduled = statusClockOrDash(times.planned, zone),
         delayed = delayed,
     )
 }

@@ -19,6 +19,7 @@ import de.rolfwalker.flightbuddy.feature.settings.SettingsViewModel
 import de.rolfwalker.flightbuddy.feature.widget.WidgetUpdater
 import de.rolfwalker.flightbuddy.tracking.AlertDispatcher
 import de.rolfwalker.flightbuddy.tracking.LiveFlightNotification
+import de.rolfwalker.flightbuddy.tracking.InsightEngine
 import de.rolfwalker.flightbuddy.tracking.PollEngine
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
@@ -30,10 +31,55 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+private val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val flightCols = listOf(
+            "checkInDesk TEXT",
+            "arrivalDelayMinutes INTEGER",
+            "codeshares TEXT",
+            "isCargo INTEGER",
+            "lastVerticalRateFpm REAL",
+            "paintedAs TEXT",
+            "operatingAs TEXT",
+            "fr24Id TEXT",
+            "fr24Eta INTEGER",
+            "destIataActual TEXT",
+            "runwayDep TEXT",
+            "runwayArr TEXT",
+            "runwayDepAt INTEGER",
+            "runwayArrAt INTEGER",
+            "firstSeenAt INTEGER",
+            "lastSeenAtFr24 INTEGER",
+            "taxiOutMin INTEGER",
+            "taxiInMin INTEGER",
+            "actualDistanceKm REAL",
+            "circleDistanceKm REAL",
+            "flightTimeSec INTEGER",
+            "depMetar TEXT",
+            "arrMetar TEXT",
+            "depAirportDelayMin INTEGER",
+            "arrAirportDelayMin INTEGER",
+            "inboundFlight TEXT",
+            "inboundDelayMin INTEGER",
+            "inboundArrAt INTEGER",
+            "punctualityMedianMin INTEGER",
+            "punctualitySample INTEGER",
+            "aircraftAgeYears INTEGER",
+            "aircraftOperator TEXT",
+            "timelineJson TEXT",
+            "insightUpdatedAt INTEGER",
+        )
+        for (col in flightCols) {
+            db.execSQL("ALTER TABLE flights ADD COLUMN $col")
+        }
+        db.execSQL("ALTER TABLE airports ADD COLUMN elevationFt INTEGER")
+    }
+}
+
 val appModule = module {
     single {
         Room.databaseBuilder(androidContext(), AppDatabase::class.java, "flightbuddy.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .fallbackToDestructiveMigration()
             .build()
     }
@@ -49,7 +95,8 @@ val appModule = module {
     single { FlightRepository(get(), get(), get(), get(), get(), get(), get()) }
     single { BackupRepository(get(), get(), get()) }
     single { AlertDispatcher(androidContext(), get()) }
-    single { PollEngine(get(), get(), get(), get(), get()) }
+    single { InsightEngine(get(), get()) }
+    single { PollEngine(get(), get(), get(), get(), get(), get()) }
     single { LiveFlightNotification(androidContext(), get(), get(), get(), get()) }
     single { WidgetUpdater(androidContext(), get()) }
     viewModel { HomeViewModel(get(), get()) }

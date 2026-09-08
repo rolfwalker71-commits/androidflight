@@ -175,7 +175,34 @@ object BackupCodec {
         putIfPresent(obj, "arrivalGate", f.arrivalGate)
         putIfPresent(obj, "arrivalTerminal", f.arrivalTerminal)
         putIfPresent(obj, "baggageBelt", f.baggageBelt)
+        putIfPresent(obj, "checkInDesk", f.checkInDesk)
         putIfPresent(obj, "delayMinutes", f.delayMinutes)
+        putIfPresent(obj, "arrivalDelayMinutes", f.arrivalDelayMinutes)
+        putIfPresent(obj, "codeshares", f.codeshares)
+        putIfPresent(obj, "isCargo", f.isCargo)
+        putIfPresent(obj, "paintedAs", f.paintedAs)
+        putIfPresent(obj, "operatingAs", f.operatingAs)
+        putIfPresent(obj, "fr24Id", f.fr24Id)
+        putIfPresent(obj, "runwayDep", f.runwayDep)
+        putIfPresent(obj, "runwayArr", f.runwayArr)
+        putIfPresent(obj, "runwayDepAt", f.runwayDepAt)
+        putIfPresent(obj, "runwayArrAt", f.runwayArrAt)
+        putIfPresent(obj, "firstSeenAt", f.firstSeenAt)
+        putIfPresent(obj, "lastSeenAtFr24", f.lastSeenAtFr24)
+        putIfPresent(obj, "taxiOutMin", f.taxiOutMin)
+        putIfPresent(obj, "taxiInMin", f.taxiInMin)
+        putIfPresent(obj, "actualDistanceKm", f.actualDistanceKm)
+        putIfPresent(obj, "circleDistanceKm", f.circleDistanceKm)
+        putIfPresent(obj, "flightTimeSec", f.flightTimeSec)
+        putIfPresent(obj, "depMetar", f.depMetar)
+        putIfPresent(obj, "arrMetar", f.arrMetar)
+        putIfPresent(obj, "depAirportDelayMin", f.depAirportDelayMin)
+        putIfPresent(obj, "arrAirportDelayMin", f.arrAirportDelayMin)
+        putIfPresent(obj, "inboundFlight", f.inboundFlight)
+        putIfPresent(obj, "inboundDelayMin", f.inboundDelayMin)
+        putIfPresent(obj, "punctualityMedianMin", f.punctualityMedianMin)
+        putIfPresent(obj, "punctualitySample", f.punctualitySample)
+        putIfPresent(obj, "timelineJson", f.timelineJson)
         putIfPresent(obj, "aircraftType", f.aircraftType)
         putIfPresent(obj, "registration", f.registration)
         putIfPresent(obj, "icao24", f.icao24)
@@ -233,7 +260,34 @@ object BackupCodec {
             arrivalGate = obj.optNullableString("arrivalGate"),
             arrivalTerminal = obj.optNullableString("arrivalTerminal"),
             baggageBelt = obj.optNullableString("baggageBelt"),
+            checkInDesk = obj.optNullableString("checkInDesk"),
             delayMinutes = obj.optNullableInt("delayMinutes"),
+            arrivalDelayMinutes = obj.optNullableInt("arrivalDelayMinutes"),
+            codeshares = obj.optNullableString("codeshares"),
+            isCargo = obj.optNullableBoolean("isCargo"),
+            paintedAs = obj.optNullableString("paintedAs"),
+            operatingAs = obj.optNullableString("operatingAs"),
+            fr24Id = obj.optNullableString("fr24Id"),
+            runwayDep = obj.optNullableString("runwayDep"),
+            runwayArr = obj.optNullableString("runwayArr"),
+            runwayDepAt = obj.optNullableLong("runwayDepAt"),
+            runwayArrAt = obj.optNullableLong("runwayArrAt"),
+            firstSeenAt = obj.optNullableLong("firstSeenAt"),
+            lastSeenAtFr24 = obj.optNullableLong("lastSeenAtFr24"),
+            taxiOutMin = obj.optNullableInt("taxiOutMin"),
+            taxiInMin = obj.optNullableInt("taxiInMin"),
+            actualDistanceKm = obj.optNullableDouble("actualDistanceKm"),
+            circleDistanceKm = obj.optNullableDouble("circleDistanceKm"),
+            flightTimeSec = obj.optNullableInt("flightTimeSec"),
+            depMetar = obj.optNullableString("depMetar"),
+            arrMetar = obj.optNullableString("arrMetar"),
+            depAirportDelayMin = obj.optNullableInt("depAirportDelayMin"),
+            arrAirportDelayMin = obj.optNullableInt("arrAirportDelayMin"),
+            inboundFlight = obj.optNullableString("inboundFlight"),
+            inboundDelayMin = obj.optNullableInt("inboundDelayMin"),
+            punctualityMedianMin = obj.optNullableInt("punctualityMedianMin"),
+            punctualitySample = obj.optNullableInt("punctualitySample"),
+            timelineJson = obj.optNullableString("timelineJson"),
             aircraftType = obj.optNullableString("aircraftType"),
             registration = obj.optNullableString("registration"),
             icao24 = obj.optNullableString("icao24"),

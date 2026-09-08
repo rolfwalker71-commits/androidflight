@@ -181,16 +181,30 @@ class FlightDetailViewModel(
     private val providers: ProviderClients,
     prefsStore: PrefsStore,
 ) : ViewModel() {
+    private val keys = org.koin.java.KoinJavaComponent.get<de.rolfwalker.flightbuddy.core.data.prefs.KeysStore>(
+        de.rolfwalker.flightbuddy.core.data.prefs.KeysStore::class.java,
+    )
     val flight = repo.observeFlight(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val photo = MutableStateFlow<AircraftPhoto?>(null)
     val prefs = prefsStore.flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UserPrefs())
-    val track = repo.observePositions(id)
-        .map { rows -> rows.map { LatLon(it.lat, it.lon) } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val officialTrack = MutableStateFlow<List<LatLon>>(emptyList())
+    val track = combine(repo.observePositions(id), officialTrack) { rows, extra ->
+        val recorded = rows.map { LatLon(it.lat, it.lon) }
+        if (extra.size > recorded.size + 4) extra else recorded
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch {
-            repo.getFlight(id)?.registration?.let { photo.value = providers.planespottersPhoto(it) }
+            repo.observeFlight(id).collect { row ->
+                val reg = row?.registration
+                if (!reg.isNullOrBlank() && photo.value == null) {
+                    photo.value = providers.planespottersPhoto(reg)
+                }
+                val hex = row?.icao24
+                if (!hex.isNullOrBlank() && officialTrack.value.isEmpty()) {
+                    officialTrack.value = providers.fetchOpenSkyTrack(keys.snapshot(), hex)
+                }
+            }
         }
     }
 

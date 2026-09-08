@@ -195,6 +195,7 @@ class AlertDispatcher(
         FlightStatus.SCHEDULED -> context.getString(R.string.status_scheduled)
         FlightStatus.DELAYED -> if (delay != null) context.getString(R.string.status_delayed_by, delay) else context.getString(R.string.status_delayed)
         FlightStatus.BOARDING -> context.getString(R.string.status_boarding)
+        FlightStatus.GATE_CLOSED -> context.getString(R.string.status_gate_closed)
         FlightStatus.DEPARTED -> context.getString(R.string.status_departed)
         FlightStatus.LANDED -> context.getString(R.string.status_landed)
         FlightStatus.CANCELLED -> context.getString(R.string.status_cancelled)

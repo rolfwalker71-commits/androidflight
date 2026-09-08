@@ -1,7 +1,7 @@
 package de.rolfwalker.flightbuddy.core.model
 
 enum class FlightStatus {
-    SCHEDULED, DELAYED, BOARDING, DEPARTED, EN_ROUTE, LANDED, CANCELLED, DIVERTED, UNKNOWN
+    SCHEDULED, DELAYED, BOARDING, GATE_CLOSED, DEPARTED, EN_ROUTE, LANDED, CANCELLED, DIVERTED, UNKNOWN
 }
 
 enum class PollPhase { INACTIVE, PREFLIGHT, AIRBORNE, COMPLETE }
@@ -54,6 +54,16 @@ data class FlightSearchResult(
     val icao24: String? = null,
     val callsign: String? = null,
     val delayMinutes: Int? = null,
+    val arrivalDelayMinutes: Int? = null,
+    val checkInDesk: String? = null,
+    val codeshares: String? = null,
+    val isCargo: Boolean? = null,
+    val runwayDepAt: Long? = null,
+    val runwayArrAt: Long? = null,
+    val fromCountry: String? = null,
+    val toCountry: String? = null,
+    val liveLat: Double? = null,
+    val liveLon: Double? = null,
     val source: String = "aerodatabox",
     val timesEstimated: Boolean = false,
 )

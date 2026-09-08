@@ -4,7 +4,7 @@ import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.model.LatLon
 import de.rolfwalker.flightbuddy.core.model.PollPhase
 
-val LIVE_STATUSES = setOf(FlightStatus.BOARDING, FlightStatus.DEPARTED, FlightStatus.EN_ROUTE)
+val LIVE_STATUSES = setOf(FlightStatus.DEPARTED, FlightStatus.EN_ROUTE)
 val PAST_STATUSES = setOf(FlightStatus.LANDED, FlightStatus.CANCELLED, FlightStatus.DIVERTED)
 
 fun isLiveStatus(status: FlightStatus) = status in LIVE_STATUSES
@@ -17,6 +17,7 @@ fun isUpcomingDisplay(status: FlightStatus) =
     status == FlightStatus.SCHEDULED ||
         status == FlightStatus.DELAYED ||
         status == FlightStatus.BOARDING ||
+        status == FlightStatus.GATE_CLOSED ||
         status == FlightStatus.UNKNOWN
 
 /** Home Live: departed, not arrived. */
@@ -29,7 +30,7 @@ const val JUST_DEPARTED_MS = 20L * 60 * 1000
 fun statusAfterGroundFix(current: FlightStatus): FlightStatus = when (current) {
     FlightStatus.CANCELLED -> current
     FlightStatus.DIVERTED -> FlightStatus.DIVERTED
-    FlightStatus.EN_ROUTE, FlightStatus.DEPARTED, FlightStatus.BOARDING,
+    FlightStatus.EN_ROUTE, FlightStatus.DEPARTED, FlightStatus.BOARDING, FlightStatus.GATE_CLOSED,
     FlightStatus.DELAYED, FlightStatus.UNKNOWN, FlightStatus.SCHEDULED -> FlightStatus.LANDED
     else -> current
 }
@@ -206,6 +207,7 @@ fun resolveDisplayStatus(
     if (departed) {
         return if (now - dep < JUST_DEPARTED_MS) FlightStatus.DEPARTED else FlightStatus.EN_ROUTE
     }
+    if (status == FlightStatus.GATE_CLOSED) return FlightStatus.GATE_CLOSED
     if (status == FlightStatus.BOARDING) return FlightStatus.BOARDING
     val delayed = status == FlightStatus.DELAYED ||
         (delayMinutes ?: 0) > 0 ||
@@ -226,7 +228,9 @@ fun mapProviderStatus(raw: String?): FlightStatus {
         return FlightStatus.EN_ROUTE
     }
     if (s.contains("depart") || s.contains("takeoff") || s.contains("gate departure")) return FlightStatus.DEPARTED
+    if (s.contains("gateclosed") || s.contains("gate closed") || s.contains("gate_closed")) return FlightStatus.GATE_CLOSED
     if (s.contains("board")) return FlightStatus.BOARDING
+    if (s.contains("checkin") || s.contains("check-in") || s.contains("check in")) return FlightStatus.SCHEDULED
     if (s.contains("delay")) return FlightStatus.DELAYED
     if (s.contains("schedul") || s.contains("expected") || s.contains("on time")) return FlightStatus.SCHEDULED
     return FlightStatus.UNKNOWN

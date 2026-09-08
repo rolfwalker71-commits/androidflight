@@ -16,12 +16,16 @@ object DateTimeFmt {
     private val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     private val DATE_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
 
-    /** Phone local zone — all user-visible clocks use this, not airport TZ. */
+    /** Phone local zone. */
     fun deviceZone(): ZoneId = ZoneId.systemDefault()
 
-    /** Airport IANA zone, or UTC when missing/invalid. Not for on-screen clocks. */
+    /** Airport IANA zone, or UTC when missing/invalid. */
     fun airportZone(iana: String?): ZoneId =
         iana?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.of("UTC")
+
+    /** Airport IANA zone for clocks; device zone when unknown. */
+    fun zoneOrDevice(iana: String?): ZoneId =
+        iana?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: deviceZone()
 
     fun date(day: LocalDate): String = DATE.format(day)
 
@@ -49,8 +53,12 @@ object DateTimeFmt {
      * Numeric offset for [zone] right now, e.g. `(UTC+2)`, `(UTC-4)`, `(UTC+5:30)`.
      * Uses [ZonedDateTime.now] so DST is the phone’s current offset, not a hardcoded zone.
      */
-    fun offsetLabel(zone: ZoneId = deviceZone()): String {
-        val total = ZonedDateTime.now(zone).offset.totalSeconds
+    fun offsetLabel(zone: ZoneId = deviceZone(), atMs: Long? = null): String {
+        val total = if (atMs != null) {
+            Instant.ofEpochMilli(atMs).atZone(zone).offset.totalSeconds
+        } else {
+            ZonedDateTime.now(zone).offset.totalSeconds
+        }
         val sign = if (total >= 0) '+' else '-'
         val abs = kotlin.math.abs(total)
         val hours = abs / 3600

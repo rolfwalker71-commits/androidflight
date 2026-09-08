@@ -7,7 +7,6 @@ import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -108,6 +107,7 @@ private object WidgetColors {
     val pillDelay = ColorProvider(R.color.widget_pill_delay)
     val pillError = ColorProvider(R.color.widget_pill_error)
     val progressTrack = ColorProvider(R.color.widget_progress_track)
+    val marker = ColorProvider(R.color.widget_marker)
 }
 
 internal object WidgetPins {
@@ -391,7 +391,7 @@ private fun RoutePlaneRow(
                 Image(
                     provider = ImageProvider(progressMarkerDrawable(marker)),
                     contentDescription = "progress",
-                    colorFilter = ColorFilter.tint(ColorProvider(Color.Black)),
+                    colorFilter = ColorFilter.tint(WidgetColors.marker),
                     modifier = GlanceModifier.size(WidgetPlane.sizeDp.dp),
                 )
             }

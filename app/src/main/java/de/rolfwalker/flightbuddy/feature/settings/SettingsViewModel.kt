@@ -1,8 +1,12 @@
 package de.rolfwalker.flightbuddy.feature.settings
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import de.rolfwalker.flightbuddy.core.data.FlightRepository
+import de.rolfwalker.flightbuddy.core.data.backup.BackupFormatException
+import de.rolfwalker.flightbuddy.core.data.backup.BackupRepository
 import de.rolfwalker.flightbuddy.core.data.db.ApiLogDao
 import de.rolfwalker.flightbuddy.core.data.prefs.ApiKeys
 import de.rolfwalker.flightbuddy.core.data.prefs.KeysStore
@@ -14,8 +18,10 @@ import de.rolfwalker.flightbuddy.core.model.ProviderStatus
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
 import de.rolfwalker.flightbuddy.core.network.hasAeroDataBox
 import de.rolfwalker.flightbuddy.tracking.LiveFlightNotification
+import de.rolfwalker.flightbuddy.tracking.TrackerController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -28,11 +34,19 @@ data class SettingsUi(
     val fr24: ProviderStatus = ProviderStatus(false),
 )
 
+sealed class BackupEvent {
+    data object Exported : BackupEvent()
+    data class Imported(val flightCount: Int) : BackupEvent()
+    data object InvalidFile : BackupEvent()
+    data object Failed : BackupEvent()
+}
+
 class SettingsViewModel(
     private val prefsStore: PrefsStore,
     private val keysStore: KeysStore,
     private val providers: ProviderClients,
     private val logs: ApiLogDao,
+    private val backup: BackupRepository,
 ) : ViewModel() {
     private fun liveNotif(): LiveFlightNotification =
         org.koin.java.KoinJavaComponent.get(LiveFlightNotification::class.java)
@@ -42,6 +56,10 @@ class SettingsViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val refresh = MutableStateFlow(0)
+    private val _backupBusy = MutableStateFlow(false)
+    val backupBusy = _backupBusy.asStateFlow()
+    private val _backupEvent = MutableStateFlow<BackupEvent?>(null)
+    val backupEvent = _backupEvent.asStateFlow()
 
     val state = combine(prefsStore.flow, keysStore.keys, refresh) { prefs, keys, _ ->
         val aeroLog = logs.last("aerodatabox")
@@ -103,6 +121,37 @@ class SettingsViewModel(
     fun untrack(id: String) {
         viewModelScope.launch {
             org.koin.java.KoinJavaComponent.get<FlightRepository>(FlightRepository::class.java).untrackObject(id)
+        }
+    }
+
+    fun exportTo(context: Context, uri: Uri) {
+        if (_backupBusy.value) return
+        viewModelScope.launch {
+            _backupBusy.value = true
+            _backupEvent.value = runCatching { backup.writeExport(context, uri) }
+                .fold(onSuccess = { BackupEvent.Exported }, onFailure = { BackupEvent.Failed })
+            _backupBusy.value = false
+        }
+    }
+
+    fun importFrom(context: Context, uri: Uri) {
+        if (_backupBusy.value) return
+        viewModelScope.launch {
+            _backupBusy.value = true
+            _backupEvent.value = runCatching {
+                val result = backup.readImport(context, uri)
+                applyAppLanguage(result.settings.language)
+                runCatching { liveNotif().onToggleChanged() }
+                refresh.value++
+                TrackerController.sync(context)
+                result
+            }.fold(
+                onSuccess = { BackupEvent.Imported(it.flightCount) },
+                onFailure = { e ->
+                    if (e is BackupFormatException) BackupEvent.InvalidFile else BackupEvent.Failed
+                },
+            )
+            _backupBusy.value = false
         }
     }
 }

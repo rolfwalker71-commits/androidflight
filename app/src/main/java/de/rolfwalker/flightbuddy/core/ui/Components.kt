@@ -33,7 +33,7 @@ import de.rolfwalker.flightbuddy.core.domain.isLiveStatus
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
 
 @Composable
-fun AirlineLogo(iata: String?, name: String?, size: Int = 40, modifier: Modifier = Modifier) {
+fun AirlineLogo(iata: String?, name: String?, size: Int = 36, modifier: Modifier = Modifier) {
     val url = airlineLogoUrl(iata)
     val initials = airlineInitials(iata, name)
     val desc = stringResource(R.string.a11y_airline_logo, name ?: iata ?: "?")

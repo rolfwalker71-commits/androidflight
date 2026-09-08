@@ -271,10 +271,12 @@ class ProviderClients(
         }
         lastAero.set(System.currentTimeMillis())
         val number = normalizeFlightNumber(flightNumber)
-        val from = if (user) date.minusDays(1) else date
-        val to = if (user) date.plusDays(1) else date
+        // LocalDate.toString() is ISO yyyy-MM-dd — same path as the PWA.
+        val day = date.toString()
+        val from = if (user) date.minusDays(1).toString() else day
+        val to = if (user) date.plusDays(1).toString() else day
         val rangePath = if (from == to) {
-            "/flights/number/${encode(number)}/$from?dateLocalRole=Both"
+            "/flights/number/${encode(number)}/$day?dateLocalRole=Both"
         } else {
             "/flights/number/${encode(number)}/$from/$to?dateLocalRole=Both"
         }
@@ -288,7 +290,7 @@ class ProviderClients(
         if (user && from != to && lookup.httpStatus in setOf(403, 404)) {
             delay(1_200)
             lastAero.set(System.currentTimeMillis())
-            val dayPath = "/flights/number/${encode(number)}/$date?dateLocalRole=Both"
+            val dayPath = "/flights/number/${encode(number)}/$day?dateLocalRole=Both"
             lookup = fetchAeroList(keys, dayPath)
         }
         return lookup

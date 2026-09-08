@@ -193,7 +193,7 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
                 items(state.flights) { f ->
                     TonalCard(Modifier.fillMaxWidth().clickable { vm.select(f.id); onOpen(f.id) }) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            AirlineLogo(f.airlineIata, f.airlineName, 32)
+                            AirlineLogo(f.airlineIata, f.airlineName, 29)
                             Column(Modifier.padding(start = 8.dp).weight(1f)) {
                                 Text(displayFlightNumber(f.flightNumber))
                                 Text(

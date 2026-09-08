@@ -17,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -44,7 +43,7 @@ fun RouteProgress(progress: Double, modifier: Modifier = Modifier) {
         Icon(
             Icons.Outlined.Flight,
             contentDescription = null,
-            tint = Color.Black,
+            tint = MaterialTheme.colorScheme.progressMarkerTint(),
             modifier = Modifier
                 .offset(x = (maxWidth - plane) * pct)
                 .size(plane)

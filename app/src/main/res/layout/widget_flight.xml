@@ -157,7 +157,7 @@
                     android:layout_gravity="center_vertical|start"
                     android:contentDescription="@string/app_name"
                     android:src="@drawable/widget_plane"
-                    android:tint="#000000" />
+                    android:tint="@color/widget_marker" />
             </FrameLayout>
 
             <TextView

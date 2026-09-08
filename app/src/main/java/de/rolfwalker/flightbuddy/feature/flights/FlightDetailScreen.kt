@@ -141,7 +141,7 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                                 modifier = Modifier.weight(1f).height(96.dp).padding(horizontal = 8.dp).clip(MaterialTheme.shapes.medium),
                             )
                         }
-                        AirlineLogo(row.airlineIata, row.airlineName, if (tablet) 72 else 48)
+                        AirlineLogo(row.airlineIata, row.airlineName, if (tablet) 65 else 43)
                     }
 
                     Spacer(Modifier.height(16.dp))

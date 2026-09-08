@@ -21,7 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -44,9 +43,10 @@ import de.rolfwalker.flightbuddy.core.domain.airlineInitials
 import de.rolfwalker.flightbuddy.core.domain.airlineLogoUrl
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.ui.Warning
+import de.rolfwalker.flightbuddy.core.ui.progressMarkerTint
 
 private object StatusCardLogo {
-    val size = 44.dp
+    val size = 40.dp
 }
 
 private object StatusCardPlane {
@@ -292,7 +292,7 @@ private fun RoutePlaneRow(
             Image(
                 painter = painterResource(progressMarkerDrawable(marker)),
                 contentDescription = null,
-                colorFilter = ColorFilter.tint(Color.Black),
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.progressMarkerTint()),
                 modifier = Modifier
                     .offset(x = (maxWidth - StatusCardPlane.size) * pct)
                     .size(StatusCardPlane.size)

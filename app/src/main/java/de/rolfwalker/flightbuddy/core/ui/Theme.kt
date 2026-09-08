@@ -10,9 +10,11 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -100,6 +102,42 @@ private val FbShapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp),
 )
 
+/** Flugsuche only: ~2sp smaller than the rest of the app (2sp ≈ 2px at default density). */
+private fun TextStyle.shrinkSearch(deltaSp: Float = 2f): TextStyle {
+    fun TextUnit.minusSp(): TextUnit {
+        if (!isSp) return this
+        return (value - deltaSp).coerceAtLeast(10f).sp
+    }
+    return copy(fontSize = fontSize.minusSp(), lineHeight = lineHeight.minusSp())
+}
+
+@Composable
+fun FlightSearchTheme(content: @Composable () -> Unit) {
+    val t = MaterialTheme.typography
+    MaterialTheme(
+        colorScheme = MaterialTheme.colorScheme,
+        shapes = MaterialTheme.shapes,
+        typography = t.copy(
+            displayLarge = t.displayLarge.shrinkSearch(),
+            displayMedium = t.displayMedium.shrinkSearch(),
+            displaySmall = t.displaySmall.shrinkSearch(),
+            headlineLarge = t.headlineLarge.shrinkSearch(),
+            headlineMedium = t.headlineMedium.shrinkSearch(),
+            headlineSmall = t.headlineSmall.shrinkSearch(),
+            titleLarge = t.titleLarge.shrinkSearch(),
+            titleMedium = t.titleMedium.shrinkSearch(),
+            titleSmall = t.titleSmall.shrinkSearch(),
+            bodyLarge = t.bodyLarge.shrinkSearch(),
+            bodyMedium = t.bodyMedium.shrinkSearch(),
+            bodySmall = t.bodySmall.shrinkSearch(),
+            labelLarge = t.labelLarge.shrinkSearch(),
+            labelMedium = t.labelMedium.shrinkSearch(),
+            labelSmall = t.labelSmall.shrinkSearch(),
+        ),
+        content = content,
+    )
+}
+
 @Composable
 fun FlightBuddyTheme(mode: ThemeMode, content: @Composable () -> Unit) {
     val dark = when (mode) {
@@ -117,3 +155,7 @@ fun FlightBuddyTheme(mode: ThemeMode, content: @Composable () -> Unit) {
 
 @Composable
 fun ColorScheme.tonalCard() = surfaceContainer
+
+/** Progress-bar plane / suitcase / clock: black on a light card, white on a dark card. */
+fun ColorScheme.progressMarkerTint(): Color =
+    if (surface.luminance() < 0.5f) Color.White else Color.Black

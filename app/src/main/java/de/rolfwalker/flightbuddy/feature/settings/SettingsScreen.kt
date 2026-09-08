@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -37,6 +39,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import java.time.LocalDate
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.DateTimeFmt
 import de.rolfwalker.flightbuddy.core.data.prefs.INVALID_API_CREDENTIAL_CHARS
@@ -49,16 +52,32 @@ import de.rolfwalker.flightbuddy.feature.map.FlightMapView
 import de.rolfwalker.flightbuddy.feature.map.labelRes
 
 @Composable
-fun SettingsScreen(vm: SettingsViewModel) {
+fun SettingsScreen(
+    vm: SettingsViewModel,
+    onExportBackup: (String) -> Unit,
+    onImportBackup: () -> Unit,
+) {
     val ui by vm.state.collectAsState()
     val objects by vm.objects.collectAsState()
+    val backupBusy by vm.backupBusy.collectAsState()
+    val backupEvent by vm.backupEvent.collectAsState()
     val context = LocalContext.current
     val activity = LocalActivity.current
     val pm = context.getSystemService(PowerManager::class.java)
     val ignoring = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+    val exportBackup = { onExportBackup("flightbuddy-backup-${LocalDate.now()}.json") }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall)
+
+        Section(stringResource(R.string.settings_backup)) {
+            BackupActions(
+                busy = backupBusy,
+                event = backupEvent,
+                onExport = exportBackup,
+                onImport = onImportBackup,
+            )
+        }
 
         Section(stringResource(R.string.settings_notifications)) {
             Pref(
@@ -193,9 +212,62 @@ fun SettingsScreen(vm: SettingsViewModel) {
             ProviderLine(stringResource(R.string.settings_opensky_name), ui.opensky)
             ProviderLine(stringResource(R.string.settings_aero_name), ui.aero)
             ProviderLine(stringResource(R.string.settings_fr24_name), ui.fr24)
+            Text(stringResource(R.string.settings_backup), style = MaterialTheme.typography.titleSmall)
+            BackupActions(
+                busy = backupBusy,
+                event = backupEvent,
+                onExport = exportBackup,
+                onImport = onImportBackup,
+            )
         }
 
         Text(stringResource(R.string.settings_logo_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun BackupActions(
+    busy: Boolean,
+    event: BackupEvent?,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+) {
+    Text(
+        stringResource(R.string.settings_backup_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilledTonalButton(
+            onClick = onExport,
+            enabled = !busy,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            Text(stringResource(R.string.settings_backup_export))
+        }
+        OutlinedButton(
+            onClick = onImport,
+            enabled = !busy,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            Text(stringResource(R.string.settings_backup_import))
+        }
+    }
+    event?.let { ev ->
+        val (text, error) = when (ev) {
+            BackupEvent.Exported -> stringResource(R.string.settings_backup_exported) to false
+            is BackupEvent.Imported -> stringResource(R.string.settings_backup_imported, ev.flightCount) to false
+            BackupEvent.InvalidFile -> stringResource(R.string.settings_backup_invalid) to true
+            BackupEvent.Failed -> stringResource(R.string.settings_backup_failed) to true
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        )
     }
 }
 

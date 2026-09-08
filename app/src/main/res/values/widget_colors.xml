@@ -10,4 +10,5 @@
     <color name="widget_pill_delay">#FFF3E0</color>
     <color name="widget_pill_error">#FCE8E6</color>
     <color name="widget_progress_track">#E8EAED</color>
+    <color name="widget_marker">#000000</color>
 </resources>

@@ -1,6 +1,8 @@
 package de.rolfwalker.flightbuddy.feature.widget
 
 import android.content.Context
+import android.content.res.Configuration
+import android.graphics.Color
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
@@ -78,3 +80,10 @@ internal fun chipBackgroundRes(status: FlightStatus): Int = when (status) {
 
 internal fun clockColorRes(delayed: Boolean): Int =
     if (delayed) R.color.widget_delay else R.color.widget_text
+
+/** Plane / suitcase / clock: black on a light widget, white when the host is night. */
+internal fun widgetMarkerColor(context: Context): Int {
+    val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+        Configuration.UI_MODE_NIGHT_YES
+    return if (night) Color.WHITE else Color.BLACK
+}

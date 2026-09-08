@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import de.rolfwalker.flightbuddy.core.data.FlightRepository
+import de.rolfwalker.flightbuddy.core.data.backup.BackupRepository
 import de.rolfwalker.flightbuddy.core.data.db.AppDatabase
 import de.rolfwalker.flightbuddy.core.data.prefs.KeysStore
 import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
@@ -46,6 +47,7 @@ val appModule = module {
     single { PrefsStore(androidContext()) }
     single { ProviderClients(get()) }
     single { FlightRepository(get(), get(), get(), get(), get(), get(), get()) }
+    single { BackupRepository(get(), get(), get()) }
     single { AlertDispatcher(androidContext(), get()) }
     single { PollEngine(get(), get(), get(), get(), get()) }
     single { LiveFlightNotification(androidContext(), get(), get(), get(), get()) }
@@ -56,5 +58,5 @@ val appModule = module {
     viewModel { MapViewModel(get(), get(), get()) }
     viewModel { LogbookViewModel(get()) }
     viewModel { AlertsViewModel(get()) }
-    viewModel { SettingsViewModel(get(), get(), get(), get()) }
+    viewModel { SettingsViewModel(get(), get(), get(), get(), get()) }
 }

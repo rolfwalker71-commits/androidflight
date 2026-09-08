@@ -29,6 +29,7 @@
     <string name="flight_query">Flight number or route</string>
     <string name="flight_query_hint">IATA / ICAO · e.g. LH441 or FRA-JFK</string>
     <string name="flight_date">Date</string>
+    <string name="flight_pick_date">Pick date</string>
     <string name="flight_find">Find flight</string>
     <string name="flight_save">Save to my flights</string>
     <string name="flight_no_results">No official schedule found for %1$s.</string>
@@ -141,6 +142,14 @@
     <string name="trip_ok">ok</string>
     <string name="trip_comfortable">comfortable</string>
     <string name="settings_title">Settings</string>
+    <string name="settings_backup">Export / Import</string>
+    <string name="settings_backup_hint">Settings, API keys (including host/URL) and saved flights as a file. The file contains secrets — do not share it.</string>
+    <string name="settings_backup_export">Export</string>
+    <string name="settings_backup_import">Import</string>
+    <string name="settings_backup_exported">Backup saved.</string>
+    <string name="settings_backup_imported">Imported %1$d flights, settings, and API keys.</string>
+    <string name="settings_backup_invalid">Not a valid FlightBuddy backup.</string>
+    <string name="settings_backup_failed">Could not save or load the backup.</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_live_notification">Ongoing live notification</string>
     <string name="settings_live_notification_hint">Persistent shade card while a flight is airborne — same content as the widget, with progress.</string>
@@ -219,6 +228,14 @@
     <string name="widget_empty">No flights</string>
     <string name="widget_progress">%1$d %%</string>
     <string name="widget_preflight_start">scheduled departure in %1$d h %2$d min</string>
+    <plurals name="widget_preflight_start_days">
+        <item quantity="one">scheduled departure in %1$d day %2$d h</item>
+        <item quantity="other">scheduled departure in %1$d days %2$d h</item>
+    </plurals>
+    <plurals name="widget_preflight_start_days_only">
+        <item quantity="one">scheduled departure in %1$d day</item>
+        <item quantity="other">scheduled departure in %1$d days</item>
+    </plurals>
     <string name="widget_inflight_remaining">%1$d h %2$d min left</string>
     <string name="widget_arrival_in">Arrives in %1$d h %2$d min</string>
     <string name="widget_city_to">%1$s → %2$s</string>

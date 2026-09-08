@@ -144,10 +144,7 @@ fun freshnessLabel(context: Context, f: FlightEntity, now: Long): String? {
 }
 
 fun flightStatusCountdown(context: Context, bar: FlightStatusBarState): String = when (bar.kind) {
-    FlightStatusBarKind.PREFLIGHT -> {
-        val (hours, minutes) = hoursAndMinutes(bar.remainingMs ?: 0L)
-        context.getString(R.string.widget_preflight_start, hours, minutes)
-    }
+    FlightStatusBarKind.PREFLIGHT -> formatPreflightCountdown(context, bar.remainingMs ?: 0L)
     FlightStatusBarKind.INFLIGHT -> {
         val remaining = bar.remainingMs
         if (remaining != null) {
@@ -159,6 +156,29 @@ fun flightStatusCountdown(context: Context, bar: FlightStatusBarState): String =
     }
     FlightStatusBarKind.LANDED -> context.getString(R.string.status_landed)
     FlightStatusBarKind.HIDDEN -> ""
+}
+
+/** ≥ 24h → days + hours (minutes dropped). Under 24h → hours + minutes. */
+fun formatPreflightCountdown(context: Context, remainingMs: Long): String {
+    val (days, hours, minutes) = daysHoursMinutes(remainingMs)
+    return if (days > 0) {
+        if (hours > 0) {
+            context.resources.getQuantityString(
+                R.plurals.widget_preflight_start_days,
+                days,
+                days,
+                hours,
+            )
+        } else {
+            context.resources.getQuantityString(
+                R.plurals.widget_preflight_start_days_only,
+                days,
+                days,
+            )
+        }
+    } else {
+        context.getString(R.string.widget_preflight_start, hours, minutes)
+    }
 }
 
 fun flightStatusLabel(context: Context, status: FlightStatus): String = when (status) {
@@ -225,6 +245,17 @@ fun routeLine(f: FlightEntity): String {
 fun hoursAndMinutes(remainingMs: Long): Pair<Int, Int> {
     val totalMin = (remainingMs.coerceAtLeast(0L) / 60_000L).toInt()
     return totalMin / 60 to totalMin % 60
+}
+
+data class DaysHoursMinutes(val days: Int, val hours: Int, val minutes: Int)
+
+fun daysHoursMinutes(remainingMs: Long): DaysHoursMinutes {
+    val totalMin = (remainingMs.coerceAtLeast(0L) / 60_000L).toInt()
+    return DaysHoursMinutes(
+        days = totalMin / (24 * 60),
+        hours = (totalMin % (24 * 60)) / 60,
+        minutes = totalMin % 60,
+    )
 }
 
 /** Hide von/nach IATA while the aircraft is still on the 4h preflight bar. */

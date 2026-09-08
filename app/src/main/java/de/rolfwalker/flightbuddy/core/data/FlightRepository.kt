@@ -49,12 +49,13 @@ class FlightRepository(
     suspend fun objectEvents(id: String) = objects.events(id)
     suspend fun recentPositions(id: String) = positions.recent(id)
 
-    suspend fun search(query: String, date: LocalDate): AeroLookup {
+    suspend fun search(query: String, date: LocalDate?): AeroLookup {
+        val day = date ?: LocalDate.now()
         return when (val parsed = parseFlightQuery(query)) {
             is FlightQuery.Unknown -> AeroLookup(emptyList(), SearchReason.UNKNOWN_QUERY)
-            is FlightQuery.Number -> providers.searchAeroNumber(keys.snapshot(), parsed.flightNumber, date, user = true)
+            is FlightQuery.Number -> providers.searchAeroNumber(keys.snapshot(), parsed.flightNumber, day, user = true)
             is FlightQuery.Route -> {
-                val lookup = providers.searchAeroAirportDepartures(keys.snapshot(), parsed.from, date)
+                val lookup = providers.searchAeroAirportDepartures(keys.snapshot(), parsed.from, day)
                 if (lookup.reason != SearchReason.OK && lookup.reason != SearchReason.EMPTY) return lookup
                 val filtered = lookup.flights.filter { it.toIata.equals(parsed.to, true) }
                 if (filtered.isNotEmpty()) AeroLookup(filtered, SearchReason.OK)
@@ -187,6 +188,33 @@ class FlightRepository(
 
     suspend fun savePosition(pos: PositionEntity) = positions.insert(pos)
     suspend fun upsertFlight(row: FlightEntity) = flights.upsert(row)
+
+    /** Merge exported flights by id or flightNumber+scheduledDep. Returns how many rows were written. */
+    suspend fun importBackupFlights(incoming: List<FlightEntity>): Int {
+        val now = System.currentTimeMillis()
+        var written = 0
+        for (raw in incoming) {
+            val existing = flights.getByNumberAndDep(raw.flightNumber, raw.scheduledDep)
+                ?: flights.get(raw.id)
+            val entity = raw.copy(
+                id = existing?.id ?: raw.id,
+                createdAt = existing?.createdAt ?: raw.createdAt,
+                updatedAt = now,
+                nextPollAt = now,
+                pollPhase = resolvePollPhase(raw.toPollInput()),
+            )
+            flights.upsert(entity)
+            entity.fromIata?.let {
+                upsertAirport(it, entity.fromCity, entity.fromTimezone, entity.fromLat, entity.fromLon)
+            }
+            entity.toIata?.let {
+                upsertAirport(it, entity.toCity, entity.toTimezone, entity.toLat, entity.toLon)
+            }
+            written++
+        }
+        return written
+    }
+
     suspend fun insertAlert(alert: AlertEntity) {
         alerts.insert(alert)
         alerts.trim()

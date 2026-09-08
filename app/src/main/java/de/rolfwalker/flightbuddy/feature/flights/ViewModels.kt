@@ -116,11 +116,17 @@ class AddFlightViewModel(private val repo: FlightRepository) : ViewModel() {
 
     fun update(block: (Ui) -> Ui) { ui.value = block(ui.value) }
 
+    fun setDate(date: LocalDate) {
+        update { it.copy(date = date, results = emptyList(), reason = null, error = null) }
+    }
+
     fun search() {
         viewModelScope.launch {
-            update { it.copy(loading = true, error = null, reason = null) }
+            val query = ui.value.query
+            val date = ui.value.date ?: LocalDate.now()
+            update { it.copy(loading = true, error = null, reason = null, date = date) }
             try {
-                val out = withContext(Dispatchers.IO) { repo.search(ui.value.query, ui.value.date) }
+                val out = withContext(Dispatchers.IO) { repo.search(query, date) }
                 update {
                     it.copy(
                         loading = false,

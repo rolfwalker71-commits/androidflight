@@ -22,6 +22,9 @@ interface FlightDao {
     @Query("SELECT * FROM flights WHERE id = :id")
     suspend fun get(id: String): FlightEntity?
 
+    @Query("SELECT * FROM flights WHERE flightNumber = :number AND scheduledDep = :scheduledDep LIMIT 1")
+    suspend fun getByNumberAndDep(number: String, scheduledDep: Long): FlightEntity?
+
     @Query("SELECT * FROM flights WHERE status NOT IN (:terminal)")
     suspend fun listActive(terminal: List<FlightStatus> = listOf(FlightStatus.LANDED, FlightStatus.CANCELLED, FlightStatus.DIVERTED)): List<FlightEntity>
 

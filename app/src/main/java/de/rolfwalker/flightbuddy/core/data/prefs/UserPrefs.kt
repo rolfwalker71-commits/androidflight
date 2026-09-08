@@ -11,6 +11,7 @@ import de.rolfwalker.flightbuddy.core.model.ThemeMode
 import de.rolfwalker.flightbuddy.core.model.Units
 import de.rolfwalker.flightbuddy.core.normalizeAppLanguage
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore("flightbuddy_prefs")
@@ -49,6 +50,8 @@ class PrefsStore(private val context: Context) {
     }
 
     val flow: Flow<UserPrefs> = context.dataStore.data.map { it.toPrefs() }
+
+    suspend fun snapshot(): UserPrefs = flow.first()
 
     suspend fun update(transform: (UserPrefs) -> UserPrefs) {
         context.dataStore.edit { prefs ->

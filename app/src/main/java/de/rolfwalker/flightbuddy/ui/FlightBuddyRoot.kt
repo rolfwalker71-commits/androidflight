@@ -78,7 +78,14 @@ import org.koin.core.parameter.parametersOf
 private data class Dest(val route: String, val label: Int, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 @Composable
-fun FlightBuddyRoot(tablet: Boolean, openFlightId: String?, openAlerts: Boolean) {
+fun FlightBuddyRoot(
+    tablet: Boolean,
+    openFlightId: String?,
+    openAlerts: Boolean,
+    settingsVm: SettingsViewModel,
+    onExportBackup: (String) -> Unit,
+    onImportBackup: () -> Unit,
+) {
     val nav = rememberNavController()
     val phone = listOf(
         Dest("home", R.string.nav_flights, Icons.Outlined.Flight),
@@ -193,8 +200,11 @@ fun FlightBuddyRoot(tablet: Boolean, openFlightId: String?, openAlerts: Boolean)
                     AlertsScreen(vm, onOpen = { id -> if (id != null) nav.navigate("flight/$id") })
                 }
                 composable("settings") {
-                    val vm: SettingsViewModel = koinViewModel()
-                    SettingsScreen(vm)
+                    SettingsScreen(
+                        vm = settingsVm,
+                        onExportBackup = onExportBackup,
+                        onImportBackup = onImportBackup,
+                    )
                 }
                 composable("flight/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
                     val id = entry.arguments?.getString("id") ?: return@composable

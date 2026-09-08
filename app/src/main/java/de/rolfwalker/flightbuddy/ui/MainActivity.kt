@@ -23,11 +23,20 @@ import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
 import de.rolfwalker.flightbuddy.core.data.prefs.UserPrefs
 import de.rolfwalker.flightbuddy.core.ui.FlightBuddyTheme
 import de.rolfwalker.flightbuddy.core.ui.LocalizedContent
+import de.rolfwalker.flightbuddy.feature.settings.SettingsViewModel
 import org.koin.android.ext.android.inject
+import org.koin.androidx.viewmodel.ext.android.viewModel
 
 class MainActivity : AppCompatActivity() {
     private val prefs: PrefsStore by inject()
+    private val settingsVm: SettingsViewModel by viewModel()
     private val notifyPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    private val exportBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) settingsVm.exportTo(this, uri)
+    }
+    private val importBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) settingsVm.importFrom(this, uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -47,7 +56,16 @@ class MainActivity : AppCompatActivity() {
                 FlightBuddyTheme(userPrefs.theme) {
                     BoxWithConstraints(Modifier.fillMaxSize()) {
                         val tablet = maxWidth >= 600.dp
-                        FlightBuddyRoot(tablet = tablet, openFlightId = openFlight, openAlerts = openAlerts)
+                        FlightBuddyRoot(
+                            tablet = tablet,
+                            openFlightId = openFlight,
+                            openAlerts = openAlerts,
+                            settingsVm = settingsVm,
+                            onExportBackup = { exportBackup.launch(it) },
+                            onImportBackup = {
+                                importBackup.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+                            },
+                        )
                     }
                 }
             }

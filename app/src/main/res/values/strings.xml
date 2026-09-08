@@ -29,6 +29,7 @@
     <string name="flight_query">Flugnummer oder Strecke</string>
     <string name="flight_query_hint">IATA / ICAO · z. B. LH441 oder FRA-JFK</string>
     <string name="flight_date">Datum</string>
+    <string name="flight_pick_date">Datum wählen</string>
     <string name="flight_find">Flug suchen</string>
     <string name="flight_save">In meinen Flügen speichern</string>
     <string name="flight_no_results">Kein offizieller Flugplan für %1$s gefunden.</string>
@@ -141,6 +142,14 @@
     <string name="trip_ok">ok</string>
     <string name="trip_comfortable">entspannt</string>
     <string name="settings_title">Einstellungen</string>
+    <string name="settings_backup">Export / Import</string>
+    <string name="settings_backup_hint">Einstellungen, API-Schlüssel (inkl. Host/URL) und gespeicherte Flüge als Datei. Die Datei enthält Geheimnisse — nicht teilen.</string>
+    <string name="settings_backup_export">Exportieren</string>
+    <string name="settings_backup_import">Importieren</string>
+    <string name="settings_backup_exported">Sicherung gespeichert.</string>
+    <string name="settings_backup_imported">%1$d Flüge, Einstellungen und API-Schlüssel importiert.</string>
+    <string name="settings_backup_invalid">Keine gültige FlightBuddy-Sicherung.</string>
+    <string name="settings_backup_failed">Sichern oder Laden fehlgeschlagen.</string>
     <string name="settings_notifications">Benachrichtigungen</string>
     <string name="settings_live_notification">Live-Benachrichtigung</string>
     <string name="settings_live_notification_hint">Dauerhafte Karte in der Statusleiste, solange ein Flug in der Luft ist — wie das Widget, mit Fortschritt.</string>
@@ -219,6 +228,14 @@
     <string name="widget_empty">Keine Flüge</string>
     <string name="widget_progress">%1$d %%</string>
     <string name="widget_preflight_start">geplanter Start in %1$d Std. %2$d Min.</string>
+    <plurals name="widget_preflight_start_days">
+        <item quantity="one">geplanter Start in %1$d Tag %2$d Std.</item>
+        <item quantity="other">geplanter Start in %1$d Tagen %2$d Std.</item>
+    </plurals>
+    <plurals name="widget_preflight_start_days_only">
+        <item quantity="one">geplanter Start in %1$d Tag</item>
+        <item quantity="other">geplanter Start in %1$d Tagen</item>
+    </plurals>
     <string name="widget_inflight_remaining">noch %1$d Std. %2$d Min.</string>
     <string name="widget_arrival_in">Ankunft in %1$d Std. %2$d Min.</string>
     <string name="widget_city_to">%1$s → %2$s</string>

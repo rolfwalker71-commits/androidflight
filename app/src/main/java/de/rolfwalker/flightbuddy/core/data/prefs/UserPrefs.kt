@@ -27,6 +27,7 @@ data class UserPrefs(
     val arrivalSoon: Boolean = true,
     val objectAlerts: Boolean = true,
     val squawkAlerts: Boolean = true,
+    val liveNotification: Boolean = true,
     val batteryPromptShown: Boolean = false,
 )
 
@@ -43,6 +44,7 @@ class PrefsStore(private val context: Context) {
         val arrival = booleanPreferencesKey("arrival")
         val objects = booleanPreferencesKey("objects")
         val squawk = booleanPreferencesKey("squawk")
+        val liveNotification = booleanPreferencesKey("live_notification")
         val battery = booleanPreferencesKey("battery_prompt")
     }
 
@@ -62,6 +64,7 @@ class PrefsStore(private val context: Context) {
             prefs[Keys.arrival] = next.arrivalSoon
             prefs[Keys.objects] = next.objectAlerts
             prefs[Keys.squawk] = next.squawkAlerts
+            prefs[Keys.liveNotification] = next.liveNotification
             prefs[Keys.battery] = next.batteryPromptShown
         }
     }
@@ -78,6 +81,7 @@ class PrefsStore(private val context: Context) {
         arrivalSoon = this[Keys.arrival] ?: true,
         objectAlerts = this[Keys.objects] ?: true,
         squawkAlerts = this[Keys.squawk] ?: true,
+        liveNotification = this[Keys.liveNotification] ?: true,
         batteryPromptShown = this[Keys.battery] ?: false,
     )
 }

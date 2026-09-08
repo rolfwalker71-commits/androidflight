@@ -142,6 +142,8 @@
     <string name="trip_comfortable">comfortable</string>
     <string name="settings_title">Settings</string>
     <string name="settings_notifications">Notifications</string>
+    <string name="settings_live_notification">Ongoing live notification</string>
+    <string name="settings_live_notification_hint">Persistent shade card while a flight is airborne — same content as the widget, with progress.</string>
     <string name="settings_gate_changes">Gate changes</string>
     <string name="settings_delays_status">Delays &amp; status</string>
     <string name="settings_preflight">Pre-flight 2h reminder</string>
@@ -189,6 +191,8 @@
     <string name="settings_logo_note">Airline logos via pics.avs.io (Travelpayouts). Not official airline marks or licenses.</string>
     <string name="tracker_title">FlightBuddy is watching your flights</string>
     <string name="tracker_body">Live status, delays, diversions and squawks — even in the background.</string>
+    <string name="tracker_minimal_title">Tracking…</string>
+    <string name="tracker_minimal_body">FlightBuddy is tracking your flights.</string>
     <string name="channel_tracking">Tracking</string>
     <string name="channel_tracking_desc">Persistent notice while flights are tracked.</string>
     <string name="channel_alerts">Alerts</string>

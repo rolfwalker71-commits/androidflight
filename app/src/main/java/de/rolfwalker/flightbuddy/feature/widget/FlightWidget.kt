@@ -7,9 +7,11 @@ import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
@@ -62,6 +64,7 @@ import de.rolfwalker.flightbuddy.core.ui.status.FlightProgressMarker
 import de.rolfwalker.flightbuddy.core.ui.status.flightProgressPercent
 import de.rolfwalker.flightbuddy.core.ui.status.flightStatusLabel
 import de.rolfwalker.flightbuddy.core.ui.status.progressMarkerDrawable
+import de.rolfwalker.flightbuddy.tracking.LiveFlightNotification
 import de.rolfwalker.flightbuddy.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -380,6 +383,7 @@ private fun RoutePlaneRow(
                 Image(
                     provider = ImageProvider(progressMarkerDrawable(marker)),
                     contentDescription = "progress",
+                    colorFilter = ColorFilter.tint(ColorProvider(Color.Black)),
                     modifier = GlanceModifier.size(WidgetPlane.sizeDp.dp),
                 )
             }
@@ -745,7 +749,10 @@ class FlightWidget5x2Receiver : FlightWidgetProvider() {
     override val glanceAppWidget = FlightBuddyWidget5x2()
 }
 
-class WidgetUpdater(private val context: Context) : KoinComponent {
+class WidgetUpdater(
+    private val context: Context,
+    private val liveNotif: LiveFlightNotification,
+) : KoinComponent {
     suspend fun updateAll(changedFlightIds: Set<String> = emptySet()) {
         RemoteFlightWidget.updateAll(context)
         val manager = GlanceAppWidgetManager(context)
@@ -753,6 +760,7 @@ class WidgetUpdater(private val context: Context) : KoinComponent {
             .onFailure { Log.e("FlightBuddy/Widget", "Glance 4x2 update failed", it) }
         runCatching { updateClass(manager, FlightBuddyWidget5x2(), FlightBuddyWidget5x2::class.java, changedFlightIds) }
             .onFailure { Log.e("FlightBuddy/Widget", "Glance 5x2 update failed", it) }
+        runCatching { liveNotif.publishUpdate() }
     }
 
     private suspend fun updateClass(

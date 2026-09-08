@@ -1,15 +1,20 @@
 package de.rolfwalker.flightbuddy.feature.settings
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -30,6 +35,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.DateTimeFmt
 import de.rolfwalker.flightbuddy.core.data.prefs.INVALID_API_CREDENTIAL_CHARS
@@ -46,13 +53,34 @@ fun SettingsScreen(vm: SettingsViewModel) {
     val ui by vm.state.collectAsState()
     val objects by vm.objects.collectAsState()
     val context = LocalContext.current
+    val activity = LocalActivity.current
     val pm = context.getSystemService(PowerManager::class.java)
-    val ignoring = pm.isIgnoringBatteryOptimizations(context.packageName)
+    val ignoring = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall)
 
         Section(stringResource(R.string.settings_notifications)) {
+            Pref(
+                label = stringResource(R.string.settings_live_notification),
+                checked = ui.prefs.liveNotification,
+                hint = stringResource(R.string.settings_live_notification_hint),
+            ) { enabled ->
+                if (enabled &&
+                    Build.VERSION.SDK_INT >= 33 &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
+                ) {
+                    activity?.let {
+                        ActivityCompat.requestPermissions(
+                            it,
+                            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                            REQUEST_POST_NOTIFICATIONS,
+                        )
+                    }
+                }
+                vm.setLiveNotification(enabled)
+            }
             Pref(stringResource(R.string.settings_gate_changes), ui.prefs.gateChanges) { vm.updatePrefs { p -> p.copy(gateChanges = it) } }
             Pref(stringResource(R.string.settings_delays_status), ui.prefs.delaysStatus) { vm.updatePrefs { p -> p.copy(delaysStatus = it) } }
             Pref(stringResource(R.string.settings_preflight), ui.prefs.preflight2h) { vm.updatePrefs { p -> p.copy(preflight2h = it) } }
@@ -182,9 +210,27 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Pref(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f))
+private fun Pref(
+    label: String,
+    checked: Boolean,
+    hint: String? = null,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            if (hint != null) {
+                Text(
+                    hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Switch(checked, onChange)
     }
 }
@@ -210,6 +256,8 @@ private fun ProviderLine(name: String, status: de.rolfwalker.flightbuddy.core.mo
         }
     }
 }
+
+private const val REQUEST_POST_NOTIFICATIONS = 3311
 
 @Preview(showBackground = true, name = "API keys KEY HOST FR24")
 @Composable

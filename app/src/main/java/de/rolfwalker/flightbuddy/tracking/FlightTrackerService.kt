@@ -1,6 +1,6 @@
 package de.rolfwalker.flightbuddy.tracking
 
-import android.app.PendingIntent
+import android.app.Notification
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -9,10 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
-import androidx.core.app.NotificationCompat
-import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.feature.widget.WidgetUpdater
-import de.rolfwalker.flightbuddy.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,6 +30,7 @@ class FlightTrackerService : Service() {
     private val engine: PollEngine by inject()
     private val alerts: AlertDispatcher by inject()
     private val widgets: WidgetUpdater by inject()
+    private val liveNotif: LiveFlightNotification by inject()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var loop: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -41,6 +39,7 @@ class FlightTrackerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         alerts.ensureChannels()
         val pm = getSystemService(PowerManager::class.java)
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "flightbuddy:tracker").apply {
@@ -57,24 +56,22 @@ class FlightTrackerService : Service() {
     }
 
     private fun startInForeground() {
-        val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notification = NotificationCompat.Builder(this, AlertDispatcher.CHANNEL_TRACKING)
-            .setSmallIcon(R.drawable.ic_stat_plane)
-            .setContentTitle(getString(R.string.tracker_title))
-            .setContentText(getString(R.string.tracker_body))
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setContentIntent(open)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(AlertDispatcher.ID_TRACKING, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(AlertDispatcher.ID_TRACKING, notification)
-        }
+        applyForeground(liveNotif.cachedOrMinimal())
+        scope.launch { applyForeground(liveNotif.buildForegroundNotification()) }
+    }
+
+    private fun applyForeground(notification: Notification) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(
+                    AlertDispatcher.ID_TRACKING,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(AlertDispatcher.ID_TRACKING, notification)
+            }
+        }.onFailure { Log.w(TAG, "startForeground failed", it) }
     }
 
     private suspend fun runLoop() {
@@ -94,11 +91,13 @@ class FlightTrackerService : Service() {
             // Always repaint every pinned card so countdown / progress / chip stay live
             // even when this cycle had no API change for that flight.
             runCatching { widgets.updateAll() }
+            runCatching { applyForeground(liveNotif.buildForegroundNotification()) }
             delay(minOf(engine.nextWakeDelayMs(), WIDGET_TICK_MS))
         }
     }
 
     override fun onDestroy() {
+        isRunning = false
         loop?.cancel()
         scope.cancel()
         if (wakeLock?.isHeld == true) wakeLock?.release()
@@ -109,6 +108,10 @@ class FlightTrackerService : Service() {
         private const val TAG = "FlightBuddy/Tracker"
         /** Recompute chip, countdown, and plane at least this often while tracking. */
         private const val WIDGET_TICK_MS = 45_000L
+
+        @Volatile
+        var isRunning: Boolean = false
+            private set
 
         fun start(context: Context) {
             val i = Intent(context, FlightTrackerService::class.java)

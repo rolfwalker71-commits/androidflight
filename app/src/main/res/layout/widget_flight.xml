@@ -161,7 +161,8 @@
                     android:layout_height="24dp"
                     android:layout_gravity="center_vertical|start"
                     android:contentDescription="@string/app_name"
-                    android:src="@drawable/widget_plane" />
+                    android:src="@drawable/widget_plane"
+                    android:tint="#000000" />
             </FrameLayout>
 
             <TextView

@@ -142,6 +142,8 @@
     <string name="trip_comfortable">entspannt</string>
     <string name="settings_title">Einstellungen</string>
     <string name="settings_notifications">Benachrichtigungen</string>
+    <string name="settings_live_notification">Live-Benachrichtigung</string>
+    <string name="settings_live_notification_hint">Dauerhafte Karte in der Statusleiste, solange ein Flug in der Luft ist — wie das Widget, mit Fortschritt.</string>
     <string name="settings_gate_changes">Gate-Änderungen</string>
     <string name="settings_delays_status">Verspätung &amp; Status</string>
     <string name="settings_preflight">Erinnerung 2 Std. vor Abflug</string>
@@ -189,6 +191,8 @@
     <string name="settings_logo_note">Airline-Logos über pics.avs.io (Travelpayouts). Keine offiziellen Marken oder Lizenzen.</string>
     <string name="tracker_title">FlightBuddy überwacht deine Flüge</string>
     <string name="tracker_body">Live-Status, Delays, Diversions und Squawks — auch im Hintergrund.</string>
+    <string name="tracker_minimal_title">Überwachung…</string>
+    <string name="tracker_minimal_body">FlightBuddy verfolgt deine Flüge.</string>
     <string name="channel_tracking">Überwachung</string>
     <string name="channel_tracking_desc">Dauerhafte Anzeige, solange Flüge verfolgt werden.</string>
     <string name="channel_alerts">Meldungen</string>

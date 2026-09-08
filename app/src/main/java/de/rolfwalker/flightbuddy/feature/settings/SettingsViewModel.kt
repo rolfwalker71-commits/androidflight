@@ -13,6 +13,7 @@ import de.rolfwalker.flightbuddy.core.data.prefs.UserPrefs
 import de.rolfwalker.flightbuddy.core.model.ProviderStatus
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
 import de.rolfwalker.flightbuddy.core.network.hasAeroDataBox
+import de.rolfwalker.flightbuddy.tracking.LiveFlightNotification
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -33,6 +34,9 @@ class SettingsViewModel(
     private val providers: ProviderClients,
     private val logs: ApiLogDao,
 ) : ViewModel() {
+    private fun liveNotif(): LiveFlightNotification =
+        org.koin.java.KoinJavaComponent.get(LiveFlightNotification::class.java)
+
     val objects = org.koin.java.KoinJavaComponent.get<FlightRepository>(FlightRepository::class.java)
         .observeObjects()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -73,6 +77,13 @@ class SettingsViewModel(
 
     fun updatePrefs(block: (UserPrefs) -> UserPrefs) {
         viewModelScope.launch { prefsStore.update(block) }
+    }
+
+    fun setLiveNotification(enabled: Boolean) {
+        viewModelScope.launch {
+            prefsStore.update { it.copy(liveNotification = enabled) }
+            runCatching { liveNotif().onToggleChanged() }
+        }
     }
 
     fun setLanguage(tag: String) {

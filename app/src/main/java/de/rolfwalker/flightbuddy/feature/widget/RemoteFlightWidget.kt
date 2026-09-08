@@ -112,6 +112,7 @@ internal object RemoteFlightWidget {
             views.setViewVisibility(R.id.widget_to_iata, View.GONE)
         }
         views.setImageViewResource(R.id.widget_plane, progressMarkerDrawable(model.progressMarker))
+        views.setInt(R.id.widget_plane, "setColorFilter", android.graphics.Color.BLACK)
         views.setProgressBar(R.id.widget_progress, 100, model.progress, false)
         positionMarker(context, views, minW, model.progress, model.showRouteIata)
 

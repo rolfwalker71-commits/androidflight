@@ -17,6 +17,7 @@ import de.rolfwalker.flightbuddy.feature.map.MapViewModel
 import de.rolfwalker.flightbuddy.feature.settings.SettingsViewModel
 import de.rolfwalker.flightbuddy.feature.widget.WidgetUpdater
 import de.rolfwalker.flightbuddy.tracking.AlertDispatcher
+import de.rolfwalker.flightbuddy.tracking.LiveFlightNotification
 import de.rolfwalker.flightbuddy.tracking.PollEngine
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
@@ -47,7 +48,8 @@ val appModule = module {
     single { FlightRepository(get(), get(), get(), get(), get(), get(), get()) }
     single { AlertDispatcher(androidContext(), get()) }
     single { PollEngine(get(), get(), get(), get(), get()) }
-    single { WidgetUpdater(androidContext()) }
+    single { LiveFlightNotification(androidContext(), get(), get(), get(), get()) }
+    single { WidgetUpdater(androidContext(), get()) }
     viewModel { HomeViewModel(get(), get()) }
     viewModel { AddFlightViewModel(get()) }
     viewModel { params -> FlightDetailViewModel(params.get(), get(), get(), get()) }

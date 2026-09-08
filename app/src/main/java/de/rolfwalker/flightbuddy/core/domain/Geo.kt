@@ -82,6 +82,30 @@ fun initialBearing(from: LatLon, to: LatLon): Double {
     return (deg + 360.0) % 360.0
 }
 
+/** Same cap as the PWA — keep projecting until the next OpenSky cycle (plus one miss). */
+const val VIEWPORT_TRAFFIC_DR_MAX_MS = 180_000L
+
+fun deadReckonAircraft(
+    lat: Double,
+    lon: Double,
+    heading: Double?,
+    speedKts: Double?,
+    elapsedMs: Long,
+): LatLon {
+    if (
+        heading == null ||
+        !heading.isFinite() ||
+        speedKts == null ||
+        !speedKts.isFinite() ||
+        speedKts <= 0.0 ||
+        elapsedMs <= 0L
+    ) {
+        return LatLon(lat, lon)
+    }
+    val nm = speedKts * (elapsedMs.coerceAtMost(VIEWPORT_TRAFFIC_DR_MAX_MS) / 3_600_000.0)
+    return destinationPoint(LatLon(lat, lon), heading, nm)
+}
+
 fun destinationPoint(start: LatLon, headingDeg: Double, distanceNm: Double): LatLon {
     if (!distanceNm.isFinite() || distanceNm == 0.0) return start
     val δ = distanceNm / NM_EARTH

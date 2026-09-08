@@ -67,6 +67,9 @@ data class TrafficState(
     val onGround: Boolean,
     val squawk: String?,
     val country: String?,
+    val airlineIata: String? = null,
+    val airlineName: String? = null,
+    val observedAt: Long = 0L,
 )
 
 class ProviderClients(

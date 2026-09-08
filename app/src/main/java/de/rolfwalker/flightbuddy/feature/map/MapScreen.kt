@@ -13,38 +13,54 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.NearMe
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.DateTimeFmt
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.data.toPollInput
+import de.rolfwalker.flightbuddy.core.domain.deadReckonAircraft
 import de.rolfwalker.flightbuddy.core.domain.displayFlightNumber
+import de.rolfwalker.flightbuddy.core.domain.displayTrafficCallsign
+import de.rolfwalker.flightbuddy.core.domain.haversineNm
 import de.rolfwalker.flightbuddy.core.domain.interpolateAirbornePosition
 import de.rolfwalker.flightbuddy.core.domain.interpolateGreatCircle
 import de.rolfwalker.flightbuddy.core.model.LatLon
@@ -52,6 +68,8 @@ import de.rolfwalker.flightbuddy.core.model.MapStyleId
 import de.rolfwalker.flightbuddy.core.ui.AirlineLogo
 import de.rolfwalker.flightbuddy.core.ui.StatusBadge
 import de.rolfwalker.flightbuddy.core.ui.TonalCard
+import de.rolfwalker.flightbuddy.core.ui.formatTrafficLevel
+import de.rolfwalker.flightbuddy.core.ui.formatTrafficSpeedKt
 import de.rolfwalker.flightbuddy.core.domain.initialBearing
 import de.rolfwalker.flightbuddy.core.network.TrafficState
 import org.maplibre.android.MapLibre
@@ -72,13 +90,58 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
+private data class TrafficFlagPos(
+    val aircraft: TrafficState,
+    val x: Float,
+    val y: Float,
+)
+
+private class TrafficFlagSlot(
+    var aircraft: TrafficState,
+    val x: androidx.compose.runtime.MutableFloatState,
+    val y: androidx.compose.runtime.MutableFloatState,
+)
+
+private class SmoothedPos(
+    var lat: Double,
+    var lon: Double,
+    var heading: Double,
+)
+
 private class FlightMapState {
     var styleId: MapStyleId? = null
+    var mapStyle: MapStyleId? = null
+    var map: MapLibreMap? = null
     var idleBound: Boolean = false
     var framedId: String? = null
+    var cameraKey: String? = null
+    var moveBound: Boolean = false
+    var motionPosted: Boolean = false
+    var alive: Boolean = true
+    var lastMotionAt: Long = 0L
     var onViewport: ((Double, Double, Double, Double) -> Unit)? = null
+    var onFlags: ((List<TrafficFlagPos>) -> Unit)? = null
+    var traffic: List<TrafficState> = emptyList()
+    var skipIcaos: Set<String> = emptySet()
+    var flights: List<FlightEntity> = emptyList()
+    var tracks: Map<String, List<LatLon>> = emptyMap()
+    val shown = HashMap<String, SmoothedPos>()
+    val motionTick = object : Runnable {
+        override fun run() {
+            val view = host ?: return
+            val state = view.mapState()
+            if (!state.alive) {
+                state.motionPosted = false
+                return
+            }
+            state.map?.let { paintMotion(it, view) }
+            view.postDelayed(this, TRAFFIC_FRAME_MS)
+        }
+    }
+    var host: MapView? = null
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun FlightMapView(
     flights: List<FlightEntity>,
@@ -93,6 +156,10 @@ fun FlightMapView(
     val context = LocalContext.current
     remember { MapLibre.getInstance(context.applicationContext) }
     var tick by remember { mutableStateOf(0) }
+    val flags = remember { mutableStateListOf<TrafficFlagSlot>() }
+    val skipIcaos = remember(flights) { flights.mapNotNull { it.icao24?.lowercase() }.toSet() }
+    val cameraKey = "$followId|$frameFlightId|$tick|${flights.joinToString { "${it.id}:${it.lastLat}:${it.lastLon}" }}"
+    val density = LocalDensity.current
     LaunchedEffect(flights.isNotEmpty()) {
         if (flights.isEmpty()) return@LaunchedEffect
         while (true) {
@@ -100,45 +167,134 @@ fun FlightMapView(
             tick++
         }
     }
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            MapView(ctx).apply {
-                tag = FlightMapState()
-                onCreate(null)
-                onStart()
-                onResume()
-                getMapAsync { map ->
-                    map.uiSettings.isAttributionEnabled = true
-                    map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(50.0, 10.0), 3.5))
-                    applyBasemap(map, this, style, flights, traffic, tracks)
-                }
-            }
-        },
-        update = { view ->
-            tick
-            val state = view.mapState()
-            state.onViewport = onViewport
-            view.getMapAsync { map ->
-                applyBasemap(map, view, style, flights, traffic, tracks)
-                updateCamera(map, state, flights, tracks, followId, frameFlightId)
-                if (!state.idleBound) {
-                    state.idleBound = true
-                    val emit = {
-                        val b = map.projection.visibleRegion.latLngBounds
-                        state.onViewport?.invoke(b.latitudeSouth, b.latitudeNorth, b.longitudeWest, b.longitudeEast)
+    LaunchedEffect(traffic.isEmpty()) {
+        if (traffic.isEmpty()) flags.clear()
+    }
+    Box(modifier) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    tag = FlightMapState()
+                    onCreate(null)
+                    onStart()
+                    onResume()
+                    getMapAsync { map ->
+                        map.uiSettings.isAttributionEnabled = true
+                        map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(50.0, 10.0), 3.5))
+                        applyBasemap(map, this, style, flights, tracks)
                     }
-                    map.addOnCameraIdleListener { emit() }
-                    emit()
+                }
+            },
+            update = { view ->
+                val state = view.mapState()
+                state.alive = true
+                state.host = view
+                state.onViewport = onViewport
+                state.traffic = traffic
+                state.skipIcaos = skipIcaos
+                state.flights = flights
+                state.tracks = tracks
+                state.mapStyle = style
+                state.onFlags = { next -> syncFlagSlots(flags, next) }
+                view.getMapAsync { map ->
+                    state.map = map
+                    applyBasemap(map, view, style, flights, tracks)
+                    if (state.cameraKey != cameraKey) {
+                        state.cameraKey = cameraKey
+                        updateCamera(map, state, flights, tracks, followId, frameFlightId)
+                    }
+                    if (!state.idleBound) {
+                        state.idleBound = true
+                        val emit = {
+                            val b = map.projection.visibleRegion.latLngBounds
+                            state.onViewport?.invoke(b.latitudeSouth, b.latitudeNorth, b.longitudeWest, b.longitudeEast)
+                        }
+                        map.addOnCameraIdleListener { emit() }
+                        emit()
+                    }
+                    if (!state.moveBound) {
+                        state.moveBound = true
+                        map.addOnCameraMoveListener { state.onFlags?.invoke(projectTrafficFlags(map, view)) }
+                    }
+                    startMotion(view)
+                }
+            },
+            onRelease = { view ->
+                val state = view.mapState()
+                state.alive = false
+                state.motionPosted = false
+                view.removeCallbacks(state.motionTick)
+                view.onPause()
+                view.onStop()
+                view.onDestroy()
+            },
+        )
+        Box(Modifier.fillMaxSize().pointerInteropFilter { false }) {
+            val labelOffset = with(density) { 18.dp.roundToPx() }
+            flags.forEach { flag ->
+                key(flag.aircraft.icao24) {
+                    TrafficCallsignFlag(
+                        aircraft = flag.aircraft,
+                        modifier = Modifier.offset {
+                            IntOffset(flag.x.floatValue.toInt() + labelOffset, flag.y.floatValue.toInt() - 20)
+                        },
+                    )
                 }
             }
-        },
-        onRelease = { view ->
-            view.onPause()
-            view.onStop()
-            view.onDestroy()
-        },
-    )
+        }
+    }
+}
+
+@Composable
+private fun TrafficCallsignFlag(aircraft: TrafficState, modifier: Modifier = Modifier) {
+    val callsign = displayTrafficCallsign(aircraft.callsign, aircraft.icao24)
+    val airline = aircraft.airlineName?.trim()?.takeIf { it.isNotEmpty() }
+    val level = formatTrafficLevel(aircraft.altitudeFt)
+    val speed = formatTrafficSpeedKt(aircraft.velocityKts)
+    val telem = listOfNotNull(level, speed).joinToString(" · ").ifBlank { null }
+    val label = buildString {
+        append(callsign)
+        if (airline != null) append(", ").append(airline)
+        if (telem != null) append(", ").append(telem)
+    }
+    Surface(
+        modifier = modifier.semantics { contentDescription = label }.widthIn(max = 136.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            AirlineLogo(aircraft.airlineIata, airline ?: callsign, 18)
+            Column {
+                Text(
+                    callsign,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
+                if (telem != null) {
+                    Text(
+                        telem,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                } else if (airline != null) {
+                    Text(
+                        airline,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
 }
 
 private fun MapView.mapState(): FlightMapState =
@@ -149,7 +305,6 @@ private fun applyBasemap(
     view: MapView,
     styleId: MapStyleId,
     flights: List<FlightEntity>,
-    traffic: List<TrafficState>,
     tracks: Map<String, List<LatLon>>,
 ) {
     val state = view.mapState()
@@ -157,17 +312,19 @@ private fun applyBasemap(
         state.styleId = styleId
         state.framedId = null
         map.setStyle(mapLibreStyleBuilder(styleId)) { loaded ->
-            if (state.styleId == styleId) drawOverlay(loaded, flights, traffic, tracks, styleId)
+            if (state.styleId == styleId) {
+                drawOverlay(loaded, flights, tracks, styleId)
+                paintTraffic(map, view, styleId)
+            }
         }
     } else {
-        map.style?.let { drawOverlay(it, flights, traffic, tracks, styleId) }
+        map.style?.let { drawOverlay(it, flights, tracks, styleId) }
     }
 }
 
 private fun drawOverlay(
     style: org.maplibre.android.maps.Style,
     flights: List<FlightEntity>,
-    traffic: List<TrafficState>,
     tracks: Map<String, List<LatLon>>,
     mapStyle: MapStyleId,
 ) {
@@ -193,17 +350,190 @@ private fun drawOverlay(
             feat.addNumberProperty("heading", planeHeading(f, pos, tracks[f.id].orEmpty()))
         }
     }
-    val trafficFeatures = traffic.map { ac ->
-        Feature.fromGeometry(Point.fromLngLat(ac.lon, ac.lat))
-    }
     val remainingOpacity = if (trackFeatures.isEmpty()) 0.9f else 0.4f
     upsertLine(style, "arcs", arcFeatures, color, 2.2f, remainingOpacity)
     upsertLine(style, "tracks", trackFeatures, color, 3.2f, 1f)
-    upsertCircles(style, "traffic", trafficFeatures, color, 4.5f)
     if (style.getImage("plane") == null) {
         style.addImage("plane", northPlaneBitmap(color))
     }
     upsertPlanes(style, planeFeatures)
+}
+
+private const val TRAFFIC_SOURCE = "viewport-traffic"
+private const val TRAFFIC_LAYER = "viewport-traffic-planes"
+private const val TRAFFIC_DOTS = "viewport-traffic-dots"
+private const val TRAFFIC_FLAG_MAX = 36
+private const val TRAFFIC_FLAG_MIN_ZOOM = 4.8
+private const val TRAFFIC_FRAME_MS = 50L
+private const val TRAFFIC_SMOOTH_TAU_S = 0.45
+
+private fun startMotion(view: MapView) {
+    val state = view.mapState()
+    if (state.motionPosted) return
+    state.motionPosted = true
+    state.host = view
+    view.removeCallbacks(state.motionTick)
+    view.post(state.motionTick)
+}
+
+private fun paintMotion(map: MapLibreMap, view: MapView) {
+    val style = map.style ?: return
+    val state = view.mapState()
+    val mapStyle = state.mapStyle ?: return
+    val color = arcColor(mapStyle)
+    if (style.getImage("plane") == null) {
+        style.addImage("plane", northPlaneBitmap(color))
+    }
+    val now = System.currentTimeMillis()
+    val dtS = if (state.lastMotionAt == 0L) {
+        TRAFFIC_FRAME_MS / 1000.0
+    } else {
+        ((now - state.lastMotionAt) / 1000.0).coerceIn(0.016, 0.2)
+    }
+    state.lastMotionAt = now
+    val alpha = (1.0 - kotlin.math.exp(-dtS / TRAFFIC_SMOOTH_TAU_S)).coerceIn(0.06, 1.0)
+    val live = HashSet<String>(state.traffic.size)
+    val features = state.traffic.mapNotNull { ac ->
+        if (ac.icao24 in state.skipIcaos) return@mapNotNull null
+        live += ac.icao24
+        val target = deadReckonAircraft(ac.lat, ac.lon, ac.heading, ac.velocityKts, now - ac.observedAt)
+        val heading = ac.heading ?: 0.0
+        val shown = state.shown[ac.icao24]
+        val pos = if (shown == null || haversineNm(LatLon(shown.lat, shown.lon), target) > 20.0) {
+            state.shown[ac.icao24] = SmoothedPos(target.lat, target.lon, heading)
+            target
+        } else {
+            shown.lat += (target.lat - shown.lat) * alpha
+            shown.lon += (target.lon - shown.lon) * alpha
+            shown.heading = lerpHeading(shown.heading, heading, alpha)
+            LatLon(shown.lat, shown.lon)
+        }
+        Feature.fromGeometry(Point.fromLngLat(pos.lon, pos.lat)).also { feat ->
+            feat.addNumberProperty("heading", state.shown[ac.icao24]?.heading ?: heading)
+            feat.addStringProperty("icao24", ac.icao24)
+        }
+    }
+    state.shown.keys.retainAll(live)
+    upsertTrafficPlanes(style, features, color)
+    val planeFeatures = state.flights.mapNotNull { f ->
+        val pos = currentPlane(f, now) ?: return@mapNotNull null
+        Feature.fromGeometry(Point.fromLngLat(pos.lon, pos.lat)).also { feat ->
+            feat.addNumberProperty("heading", planeHeading(f, pos, state.tracks[f.id].orEmpty()))
+        }
+    }
+    upsertPlanes(style, planeFeatures)
+    state.onFlags?.invoke(projectTrafficFlags(map, view))
+}
+
+private fun syncFlagSlots(
+    slots: SnapshotStateList<TrafficFlagSlot>,
+    next: List<TrafficFlagPos>,
+) {
+    val incoming = next.associateBy { it.aircraft.icao24 }
+    slots.removeAll { it.aircraft.icao24 !in incoming }
+    val existing = slots.associateBy { it.aircraft.icao24 }
+    for (pos in next) {
+        val slot = existing[pos.aircraft.icao24]
+        if (slot != null) {
+            slot.x.floatValue = pos.x
+            slot.y.floatValue = pos.y
+            slot.aircraft = pos.aircraft
+        } else {
+            slots.add(
+                TrafficFlagSlot(
+                    aircraft = pos.aircraft,
+                    x = mutableFloatStateOf(pos.x),
+                    y = mutableFloatStateOf(pos.y),
+                ),
+            )
+        }
+    }
+}
+
+private fun lerpHeading(from: Double, to: Double, t: Double): Double {
+    var delta = (to - from) % 360.0
+    if (delta > 180.0) delta -= 360.0
+    if (delta < -180.0) delta += 360.0
+    return ((from + delta * t) % 360.0 + 360.0) % 360.0
+}
+
+private fun paintTraffic(map: MapLibreMap, view: MapView, mapStyle: MapStyleId) {
+    view.mapState().mapStyle = mapStyle
+    paintMotion(map, view)
+    view.mapState().onFlags?.invoke(projectTrafficFlags(map, view))
+}
+
+private fun projectTrafficFlags(
+    map: MapLibreMap,
+    view: MapView,
+): List<TrafficFlagPos> {
+    val state = view.mapState()
+    if (state.traffic.isEmpty() || map.cameraPosition.zoom < TRAFFIC_FLAG_MIN_ZOOM) return emptyList()
+    val w = view.width.toFloat()
+    val h = view.height.toFloat()
+    if (w < 8f || h < 8f) return emptyList()
+    val now = System.currentTimeMillis()
+    val visible = state.traffic.mapNotNull { ac ->
+        if (ac.icao24 in state.skipIcaos) return@mapNotNull null
+        val shown = state.shown[ac.icao24]
+        val pos = if (shown != null) {
+            LatLon(shown.lat, shown.lon)
+        } else {
+            deadReckonAircraft(ac.lat, ac.lon, ac.heading, ac.velocityKts, now - ac.observedAt)
+        }
+        val screen = map.projection.toScreenLocation(LatLng(pos.lat, pos.lon))
+        if (screen.x < -120f || screen.y < -48f || screen.x > w + 24f || screen.y > h + 24f) return@mapNotNull null
+        TrafficFlagPos(ac, screen.x, screen.y)
+    }
+    if (visible.size <= TRAFFIC_FLAG_MAX) return visible
+    val cx = w / 2f
+    val cy = h / 2f
+    return visible.sortedBy { (it.x - cx) * (it.x - cx) + (it.y - cy) * (it.y - cy) }.take(TRAFFIC_FLAG_MAX)
+}
+
+private fun upsertTrafficPlanes(
+    style: org.maplibre.android.maps.Style,
+    features: List<Feature>,
+    color: String,
+) {
+    val collection = FeatureCollection.fromFeatures(features)
+    val src = style.getSourceAs<GeoJsonSource>(TRAFFIC_SOURCE)
+    if (src == null) style.addSource(GeoJsonSource(TRAFFIC_SOURCE, collection))
+    else src.setGeoJson(collection)
+    if (style.getLayer(TRAFFIC_DOTS) == null) {
+        addTrafficLayer(
+            style,
+            CircleLayer(TRAFFIC_DOTS, TRAFFIC_SOURCE).withProperties(
+                PropertyFactory.circleColor(color),
+                PropertyFactory.circleRadius(5.5f),
+                PropertyFactory.circleStrokeWidth(1.4f),
+                PropertyFactory.circleStrokeColor("#FFFFFFFF"),
+                PropertyFactory.circleOpacity(0.95f),
+            ),
+        )
+    }
+    if (style.getLayer(TRAFFIC_LAYER) == null) {
+        addTrafficLayer(
+            style,
+            SymbolLayer(TRAFFIC_LAYER, TRAFFIC_SOURCE).withProperties(
+                PropertyFactory.iconImage("plane"),
+                PropertyFactory.iconSize(0.78f),
+                PropertyFactory.iconRotate(Expression.get("heading")),
+                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.iconIgnorePlacement(true),
+            ),
+        )
+    }
+}
+
+private fun addTrafficLayer(style: org.maplibre.android.maps.Style, layer: org.maplibre.android.style.layers.Layer) {
+    try {
+        if (style.getLayer("planes") != null) style.addLayerBelow(layer, "planes")
+        else style.addLayer(layer)
+    } catch (_: Exception) {
+        runCatching { style.addLayer(layer) }
+    }
 }
 
 private fun upsertLine(
@@ -223,31 +553,6 @@ private fun upsertLine(
                 PropertyFactory.lineColor(color),
                 PropertyFactory.lineWidth(width),
                 PropertyFactory.lineOpacity(opacity),
-            ),
-        )
-    } else {
-        src.setGeoJson(collection)
-    }
-}
-
-private fun upsertCircles(
-    style: org.maplibre.android.maps.Style,
-    id: String,
-    features: List<Feature>,
-    color: String,
-    radius: Float,
-) {
-    val collection = FeatureCollection.fromFeatures(features)
-    val src = style.getSourceAs<GeoJsonSource>(id)
-    if (src == null) {
-        style.addSource(GeoJsonSource(id, collection))
-        style.addLayer(
-            CircleLayer(id, id).withProperties(
-                PropertyFactory.circleColor(color),
-                PropertyFactory.circleRadius(radius),
-                PropertyFactory.circleStrokeWidth(1.2f),
-                PropertyFactory.circleStrokeColor("#FFFFFFFF"),
-                PropertyFactory.circleOpacity(0.9f),
             ),
         )
     } else {

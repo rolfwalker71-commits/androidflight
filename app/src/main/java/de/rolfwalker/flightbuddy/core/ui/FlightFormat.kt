@@ -55,6 +55,18 @@ fun formatSpeedPair(kts: Double?, language: String): Pair<String, String> {
     return primary to secondary
 }
 
+/** Compact map chip: FL340, or feet when still very low. */
+fun formatTrafficLevel(ft: Double?): String? {
+    if (ft == null || !ft.isFinite() || ft < 0) return null
+    val fl = (ft / 100.0).roundToInt()
+    return if (fl < 10) "${ft.roundToInt()} ft" else "FL$fl"
+}
+
+fun formatTrafficSpeedKt(kts: Double?): String? {
+    if (kts == null || !kts.isFinite() || kts < 0) return null
+    return "${kts.roundToInt()} kt"
+}
+
 fun formatHeading(deg: Double?, language: String): String {
     if (deg == null) return "—"
     return "${formatGrouped(deg, language)}°"

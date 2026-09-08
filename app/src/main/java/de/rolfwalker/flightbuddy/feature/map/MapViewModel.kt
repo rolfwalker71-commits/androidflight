@@ -8,6 +8,7 @@ import de.rolfwalker.flightbuddy.core.data.db.TrackedObjectEntity
 import de.rolfwalker.flightbuddy.core.data.prefs.KeysStore
 import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
 import de.rolfwalker.flightbuddy.core.data.prefs.UserPrefs
+import de.rolfwalker.flightbuddy.core.domain.resolveTrafficAirline
 import de.rolfwalker.flightbuddy.core.model.LatLon
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
 import de.rolfwalker.flightbuddy.core.network.TrafficState
@@ -120,7 +121,12 @@ class MapViewModel(
 
     private fun requestTraffic(box: ViewportBox, debounceMs: Long) {
         if (!isValidBox(box)) return
-        val area = (box.lamax - box.lamin) * (box.lomax - box.lomin)
+        val lonSpan = if (box.lomax >= box.lomin) {
+            box.lomax - box.lomin
+        } else {
+            (180.0 - box.lomin) + (box.lomax + 180.0)
+        }
+        val area = (box.lamax - box.lamin) * lonSpan
         if (area > VIEWPORT_MAX_AREA_SQ_DEG) {
             trafficZoom.value = true
             traffic.value = emptyList()
@@ -138,15 +144,21 @@ class MapViewModel(
                 lomin = box.lomin,
                 lomax = box.lomax,
             )
-            if (rows != null) traffic.value = rows
+            if (rows != null) {
+                val at = System.currentTimeMillis()
+                traffic.value = rows.map { ac ->
+                    val (iata, name) = resolveTrafficAirline(ac.callsign)
+                    ac.copy(airlineIata = iata, airlineName = name, observedAt = at)
+                }
+            }
             trafficError.value = providers.lastOpenSkyError
         }
     }
 
     private fun isValidBox(box: ViewportBox): Boolean {
         if (!listOf(box.lamin, box.lamax, box.lomin, box.lomax).all { it.isFinite() }) return false
-        if (box.lamin < -90 || box.lamax > 90 || box.lamin >= box.lamax) return false
-        if (box.lomin < -180 || box.lomax > 180 || box.lomin >= box.lomax) return false
+        if (box.lamin < -91 || box.lamax > 91 || box.lamin >= box.lamax) return false
+        if (box.lomin == box.lomax) return false
         return true
     }
 

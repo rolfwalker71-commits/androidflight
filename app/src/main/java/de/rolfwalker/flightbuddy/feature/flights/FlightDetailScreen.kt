@@ -16,7 +16,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +54,9 @@ import de.rolfwalker.flightbuddy.core.domain.haversineNm
 import de.rolfwalker.flightbuddy.core.domain.interpolateAirbornePosition
 import de.rolfwalker.flightbuddy.core.domain.isEmergencySquawk
 import de.rolfwalker.flightbuddy.core.domain.isLiveStatus
+import de.rolfwalker.flightbuddy.core.domain.observedArrAt
+import de.rolfwalker.flightbuddy.core.domain.observedDepAt
+import de.rolfwalker.flightbuddy.core.ui.status.displayFlightStatus
 import de.rolfwalker.flightbuddy.core.domain.wetLeaseLine
 import de.rolfwalker.flightbuddy.core.model.LatLon
 import de.rolfwalker.flightbuddy.core.model.Units
@@ -70,6 +75,7 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
     val flight by vm.flight.collectAsState()
     val photo by vm.photo.collectAsState()
     val prefs by vm.prefs.collectAsState()
+    val refreshing by vm.refreshing.collectAsState()
     val track by vm.track.collectAsState()
     var confirm by remember { mutableStateOf(false) }
     val row = flight ?: return
@@ -82,12 +88,13 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
         if (row.lastLat != null && row.lastLon != null) LatLon(row.lastLat, row.lastLon) else null,
         System.currentTimeMillis(),
     )
-    val progress = flightProgress(origin, dest, interp.position, row.scheduledDep, row.scheduledArr, row.estimatedDep, row.estimatedArr, row.actualDep, row.actualArr)
+    val progress = flightProgress(origin, dest, interp.position, row.scheduledDep, row.scheduledArr, row.estimatedDep, row.estimatedArr, row.observedDepAt(), row.observedArrAt())
     val remaining = if (interp.position != null && dest != null) haversineNm(interp.position, dest) else null
     val language = prefs.language
     val units = prefs.units
     val aircraft = listOfNotNull(row.aircraftType, row.registration).joinToString(" · ")
-    val live = isLiveStatus(row.status)
+    val shown = displayFlightStatus(row)
+    val live = isLiveStatus(shown)
     val gap = if (tablet) 10.dp else 8.dp
 
     Column(Modifier.fillMaxSize()) {
@@ -109,7 +116,23 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             )
-            Box(Modifier.size(44.dp))
+            IconButton(
+                onClick = { vm.refreshLive() },
+                enabled = !refreshing,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainer),
+            ) {
+                if (refreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.flight_refresh))
+                }
+            }
         }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -212,11 +235,11 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                     AirportClockPair(
                         depScheduled = row.scheduledDep,
                         depEstimated = row.estimatedDep,
-                        depActual = row.actualDep,
+                        depActual = row.observedDepAt(),
                         arrScheduled = row.scheduledArr,
                         arrEstimated = row.estimatedArr,
-                        arrActual = row.actualArr,
-                        status = row.status,
+                        arrActual = row.observedArrAt(),
+                        status = shown,
                         language = language,
                         variant = ClockVariant.DETAIL,
                         depZone = row.depZone(),
@@ -242,7 +265,7 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            StatusBadge(row.status, row.delayMinutes)
+                            StatusBadge(shown, row.delayMinutes)
                             if (isEmergencySquawk(row.lastSquawk)) {
                                 Text(stringResource(R.string.flight_squawk, row.lastSquawk!!), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
                             }

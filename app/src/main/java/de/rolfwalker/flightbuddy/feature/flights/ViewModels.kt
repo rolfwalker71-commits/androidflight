@@ -21,6 +21,7 @@ import de.rolfwalker.flightbuddy.core.model.SearchReason
 import de.rolfwalker.flightbuddy.core.data.prefs.isInvalidApiCredentialException
 import de.rolfwalker.flightbuddy.core.data.prefs.redactProviderError
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
+import de.rolfwalker.flightbuddy.tracking.PollEngine
 import de.rolfwalker.flightbuddy.tracking.TrackerController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -180,12 +181,14 @@ class FlightDetailViewModel(
     private val repo: FlightRepository,
     private val providers: ProviderClients,
     prefsStore: PrefsStore,
+    private val engine: PollEngine,
 ) : ViewModel() {
     private val keys = org.koin.java.KoinJavaComponent.get<de.rolfwalker.flightbuddy.core.data.prefs.KeysStore>(
         de.rolfwalker.flightbuddy.core.data.prefs.KeysStore::class.java,
     )
     val flight = repo.observeFlight(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val photo = MutableStateFlow<AircraftPhoto?>(null)
+    val refreshing = MutableStateFlow(false)
     val prefs = prefsStore.flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UserPrefs())
     private val officialTrack = MutableStateFlow<List<LatLon>>(emptyList())
     val track = combine(repo.observePositions(id), officialTrack) { rows, extra ->
@@ -194,6 +197,7 @@ class FlightDetailViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
+        refreshLive()
         viewModelScope.launch {
             repo.observeFlight(id).collect { row ->
                 val reg = row?.registration
@@ -204,6 +208,19 @@ class FlightDetailViewModel(
                 if (!hex.isNullOrBlank() && officialTrack.value.isEmpty()) {
                     officialTrack.value = providers.fetchOpenSkyTrack(keys.snapshot(), hex)
                 }
+            }
+        }
+    }
+
+    fun refreshLive() {
+        viewModelScope.launch {
+            if (refreshing.value) return@launch
+            refreshing.value = true
+            try {
+                val row = repo.getFlight(id) ?: return@launch
+                engine.pollFlight(row, forceLive = true)
+            } finally {
+                refreshing.value = false
             }
         }
     }

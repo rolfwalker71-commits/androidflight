@@ -8,7 +8,12 @@ import de.rolfwalker.flightbuddy.core.data.prefs.isInvalidApiCredentialException
 import de.rolfwalker.flightbuddy.core.data.prefs.redactProviderError
 import de.rolfwalker.flightbuddy.core.data.prefs.sanitizeApiCredential
 import de.rolfwalker.flightbuddy.core.data.prefs.sanitized
+import de.rolfwalker.flightbuddy.core.domain.callsignMatches
+import de.rolfwalker.flightbuddy.core.domain.callsignPrefix
+import de.rolfwalker.flightbuddy.core.domain.compactCallsign
 import de.rolfwalker.flightbuddy.core.domain.mapProviderStatus
+import de.rolfwalker.flightbuddy.core.domain.paddedIataFlightNumbers
+import de.rolfwalker.flightbuddy.core.domain.stripFlightZeros
 import de.rolfwalker.flightbuddy.core.model.AircraftPhoto
 import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
 import de.rolfwalker.flightbuddy.core.model.SearchReason
@@ -172,20 +177,36 @@ class ProviderClients(
     }
 
     private fun parseTime(raw: Any?): Long? {
-        if (raw == null) return null
+        if (raw == null || raw == JSONObject.NULL) return null
+        if (raw is Number) {
+            val n = raw.toLong()
+            if (n <= 0L) return null
+            return if (n < 10_000_000_000L) n * 1000L else n
+        }
         val s = when (raw) {
-            is String -> raw
             is JSONObject -> raw.optString("utc").ifBlank { raw.optString("local") }
             else -> raw.toString()
         }.trim()
-        if (s.isBlank()) return null
-        val spaced = Regex("""^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?::(\d{2}))?(Z|[+-]\d{2}:\d{2})$""").find(s)
+        if (s.isBlank() || s == "null") return null
+        val spaced = Regex("""^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?(Z|[+-]\d{2}:?\d{2})?$""").find(s)
         val iso = if (spaced != null) {
-            "${spaced.groupValues[1]}T${spaced.groupValues[2]}:${spaced.groupValues[3].ifBlank { "00" }}${spaced.groupValues[4]}"
+            val sec = spaced.groupValues[3].ifBlank { "00" }
+            val off = spaced.groupValues[4].ifBlank { "Z" }.let { if (it.length == 5) "${it.substring(0, 3)}:${it.substring(3)}" else it }
+            "${spaced.groupValues[1]}T${spaced.groupValues[2]}:$sec$off"
         } else s
         return runCatching { OffsetDateTime.parse(iso).toInstant().toEpochMilli() }
             .recoverCatching { Instant.parse(iso).toEpochMilli() }
             .getOrNull()
+    }
+
+    /** Aero movement times: `runwayTime` is takeoff/landing; `actualTime` is legacy off-block. */
+    private fun aeroTime(movement: JSONObject?, vararg keys: String): Long? {
+        if (movement == null) return null
+        for (key in keys) {
+            parseTime(movement.opt(key))?.let { return it }
+            parseTime(movement.opt("${key}Utc"))?.let { return it }
+        }
+        return null
     }
 
     private fun finite(vararg values: Any?): Double? {
@@ -257,14 +278,14 @@ class ProviderClients(
             toLon = arrLon,
             fromCountry = depAirport?.optString("countryCode")?.ifBlank { null },
             toCountry = arrAirport?.optString("countryCode")?.ifBlank { null },
-            scheduledDep = parseTime(dep?.opt("scheduledTimeUtc") ?: dep?.opt("scheduledTime") ?: dep?.opt("scheduledTimeLocal")),
-            scheduledArr = parseTime(arr?.opt("scheduledTimeUtc") ?: arr?.opt("scheduledTime") ?: arr?.opt("scheduledTimeLocal")),
-            estimatedDep = parseTime(dep?.opt("revisedTimeUtc") ?: dep?.opt("revisedTime") ?: dep?.opt("predictedTime")),
-            estimatedArr = parseTime(arr?.opt("revisedTimeUtc") ?: arr?.opt("revisedTime") ?: arr?.opt("predictedTime")),
-            actualDep = parseTime(dep?.opt("actualTimeUtc") ?: dep?.opt("actualTime")),
-            actualArr = parseTime(arr?.opt("actualTimeUtc") ?: arr?.opt("actualTime")),
-            runwayDepAt = parseTime(dep?.opt("runwayTimeUtc") ?: dep?.opt("runwayTime")),
-            runwayArrAt = parseTime(arr?.opt("runwayTimeUtc") ?: arr?.opt("runwayTime")),
+            scheduledDep = aeroTime(dep, "scheduledTime"),
+            scheduledArr = aeroTime(arr, "scheduledTime"),
+            estimatedDep = aeroTime(dep, "revisedTime", "predictedTime"),
+            estimatedArr = aeroTime(arr, "revisedTime", "predictedTime"),
+            actualDep = aeroTime(dep, "runwayTime", "actualTime"),
+            actualArr = aeroTime(arr, "runwayTime", "actualTime"),
+            runwayDepAt = aeroTime(dep, "runwayTime"),
+            runwayArrAt = aeroTime(arr, "runwayTime"),
             status = mapProviderStatus(statusRaw),
             gate = dep?.optString("gate")?.ifBlank { null },
             terminal = dep?.optString("terminal")?.ifBlank { null },
@@ -283,9 +304,38 @@ class ProviderClients(
             isCargo = obj.optBoolean("isCargo", false).takeIf { obj.has("isCargo") },
             liveLat = loc?.let { finite(it.opt("lat"), it.opt("latitude")) },
             liveLon = loc?.let { finite(it.opt("lon"), it.opt("longitude")) },
+            liveAltitudeFt = aeroDistanceFt(loc),
+            liveVelocityKts = aeroSpeedKt(loc),
+            liveHeading = aeroTrackDeg(loc),
+            liveVerticalRateFpm = loc?.let {
+                finite(it.opt("vsiFpm"), it.opt("verticalSpeedFpm"), it.opt("verticalRate"))
+            },
             source = "aerodatabox",
         )
     }
+
+    private fun aeroNestedMeasure(obj: JSONObject?, vararg keys: String): Double? {
+        if (obj == null) return null
+        for (key in keys) {
+            finite(obj.opt(key))?.let { return it }
+            val nested = obj.optJSONObject(key) ?: continue
+            finite(
+                nested.opt("feet"), nested.opt("ft"),
+                nested.opt("kt"), nested.opt("kts"),
+                nested.opt("deg"), nested.opt("value"),
+            )?.let { return it }
+        }
+        return null
+    }
+
+    private fun aeroDistanceFt(loc: JSONObject?): Double? =
+        aeroNestedMeasure(loc, "altitude", "pressureAltitude", "altFt", "pressureAltFt")
+
+    private fun aeroSpeedKt(loc: JSONObject?): Double? =
+        aeroNestedMeasure(loc, "groundSpeed", "gsKt")
+
+    private fun aeroTrackDeg(loc: JSONObject?): Double? =
+        aeroNestedMeasure(loc, "trueTrack", "trackDeg", "track")
 
     private fun classifyAero(status: Int, body: String): SearchReason {
         val msg = body.lowercase()
@@ -387,9 +437,9 @@ class ProviderClients(
         val from = if (user) date.minusDays(1).toString() else day
         val to = if (user) date.plusDays(1).toString() else day
         val rangePath = if (from == to) {
-            "/flights/number/${encode(number)}/$day?dateLocalRole=Both"
+            "/flights/number/${encode(number)}/$day?dateLocalRole=Both&withLocation=true"
         } else {
-            "/flights/number/${encode(number)}/$from/$to?dateLocalRole=Both"
+            "/flights/number/${encode(number)}/$from/$to?dateLocalRole=Both&withLocation=true"
         }
         var lookup = fetchAeroList(keys, rangePath)
         if (user && lookup.httpStatus == 429) {
@@ -401,7 +451,7 @@ class ProviderClients(
         if (user && from != to && lookup.httpStatus in setOf(403, 404)) {
             delay(1_200)
             lastAero.set(System.currentTimeMillis())
-            val dayPath = "/flights/number/${encode(number)}/$day?dateLocalRole=Both"
+            val dayPath = "/flights/number/${encode(number)}/$day?dateLocalRole=Both&withLocation=true"
             lookup = fetchAeroList(keys, dayPath)
         }
         return lookup
@@ -410,7 +460,7 @@ class ProviderClients(
     suspend fun searchAeroRange(keys: ApiKeys, flightNumber: String, from: LocalDate, to: LocalDate): AeroLookup {
         if (!keys.hasAeroDataBox()) return AeroLookup(emptyList(), SearchReason.UNCONFIGURED)
         val number = normalizeFlightNumber(flightNumber)
-        val path = "/flights/number/${encode(number)}/${from}/${to}?dateLocalRole=Both"
+        val path = "/flights/number/${encode(number)}/${from}/${to}?dateLocalRole=Both&withLocation=true"
         return fetchAeroList(keys, path)
     }
 
@@ -561,6 +611,9 @@ class ProviderClients(
         lomax: Double? = null,
         ignoreInterval: Boolean = false,
     ): List<TrafficState> {
+        val hasIcao = !icao24.isNullOrBlank()
+        val hasBox = lamin != null && lamax != null && lomin != null && lomax != null
+        if (!hasIcao && !hasBox) return emptyList()
         val min = keys.openSkyMinIntervalMs.toLong().coerceAtLeast(90_000)
         val since = System.currentTimeMillis() - lastOpenSky.get()
         if (!ignoreInterval) {
@@ -651,28 +704,41 @@ class ProviderClients(
         )
     }
 
-    suspend fun fetchFr24(keys: ApiKeys, flightNumber: String?, callsign: String?, icao24: String?, lat: Double?, lon: Double?): LiveFix? {
+    suspend fun fetchFr24(
+        keys: ApiKeys,
+        flightNumber: String?,
+        callsign: String?,
+        icao24: String?,
+        lat: Double?,
+        lon: Double?,
+        registration: String? = null,
+        ignoreInterval: Boolean = false,
+    ): LiveFix? {
         val token = sanitizeApiCredential(keys.fr24Token)
         if (token.isBlank() || !keys.fr24Enabled) return null
         val min = keys.fr24MinIntervalMs.toLong().coerceAtLeast(180_000)
         val since = System.currentTimeMillis() - lastFr24.get()
-        if (lastFr24.get() != 0L && since < min) return null
+        if (!ignoreInterval && lastFr24.get() != 0L && since < min) return null
         lastFr24.set(System.currentTimeMillis())
-        val params = mutableListOf("limit=1", "data_sources=ADSB,MLAT,UAT")
+        val flights = paddedIataFlightNumbers(flightNumber).joinToString(",").ifBlank { null }
+        val signs = callsign?.split(',')
+            ?.map { compactCallsign(it) }
+            ?.filter { it.isNotBlank() && callsignPrefix(it)?.length == 3 }
+            ?.distinct()
+            ?.joinToString(",")
+            ?.ifBlank { null }
+        val reg = registration?.uppercase()?.replace(Regex("[\\s-]+"), "")?.ifBlank { null }
+        val params = mutableListOf("limit=15")
+        if (flights != null) params += "flights=$flights"
+        if (signs != null) params += "callsigns=$signs"
+        if (reg != null) params += "registrations=$reg"
         val path = when {
-            !callsign.isNullOrBlank() -> {
-                params += "callsigns=${callsign.replace(" ", "")}"
+            flights != null || signs != null || reg != null ->
                 "/api/live/flight-positions/full?${params.joinToString("&")}"
-            }
-            !flightNumber.isNullOrBlank() -> {
-                params += "flights=${flightNumber.uppercase().replace(Regex("[\\s-]+"), "")}"
-                "/api/live/flight-positions/full?${params.joinToString("&")}"
-            }
             icao24 != null && lat != null && lon != null -> {
                 val n = (lat + 1.5).coerceAtMost(90.0)
                 val s = (lat - 1.5).coerceAtLeast(-90.0)
                 params += "bounds=$n,$s,${lon - 1.5},${lon + 1.5}"
-                params[0] = "limit=5"
                 "/api/live/flight-positions/full?${params.joinToString("&")}"
             }
             else -> return null
@@ -697,9 +763,18 @@ class ProviderClients(
                 log("fr24", path, res.code, true, null, lastFr24Remaining)
                 val root = if (body.trim().startsWith("[")) JSONArray(body) else JSONObject(body).optJSONArray("data") ?: JSONArray()
                 if (root.length() == 0) return@withContext null
-                val row = (0 until root.length()).map { root.getJSONObject(it) }.firstOrNull { obj ->
-                    icao24 == null || obj.optString("hex").equals(icao24, true)
-                } ?: root.getJSONObject(0)
+                val rows = (0 until root.length()).map { root.getJSONObject(it) }
+                val flightKeys = paddedIataFlightNumbers(flightNumber).toSet()
+                val signSet = signs?.split(',')?.toSet().orEmpty()
+                val row = rows.firstOrNull { obj ->
+                    icao24 != null && obj.optString("hex").equals(icao24, true)
+                } ?: rows.firstOrNull { obj ->
+                    val f = compactCallsign(obj.optString("flight"))
+                    val c = compactCallsign(obj.optString("callsign"))
+                    (f.isNotEmpty() && flightKeys.any { it == f || stripFlightZeros(f) == stripFlightZeros(it) }) ||
+                        callsignMatches(c, signSet)
+                } ?: rows.firstOrNull()
+                if (row == null) return@withContext null
                 val rlat = row.optDouble("lat", Double.NaN)
                 val rlon = row.optDouble("lon", Double.NaN)
                 if (!rlat.isFinite() || !rlon.isFinite()) return@withContext null

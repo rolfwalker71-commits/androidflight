@@ -269,14 +269,14 @@ class FlightRepository(
 fun FlightEntity.toPollInput() = de.rolfwalker.flightbuddy.core.domain.PollInput(
     status = status,
     scheduledDep = scheduledDep,
-    actualDep = actualDep,
+    actualDep = actualDep ?: runwayDepAt,
     estimatedDep = estimatedDep,
     scheduledArr = scheduledArr,
     estimatedArr = estimatedArr,
     lastLat = lastLat,
     lastLon = lastLon,
     lastPositionAt = lastPositionAt,
-    actualArr = actualArr,
+    actualArr = actualArr ?: runwayArrAt,
     origin = if (fromLat != null && fromLon != null) de.rolfwalker.flightbuddy.core.model.LatLon(fromLat, fromLon) else null,
     dest = if (toLat != null && toLon != null) de.rolfwalker.flightbuddy.core.model.LatLon(toLat, toLon) else null,
 )

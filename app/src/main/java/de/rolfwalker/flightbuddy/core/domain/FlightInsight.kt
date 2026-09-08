@@ -15,6 +15,12 @@ data class TimelineEvent(
 fun FlightEntity.depZone(): ZoneId = DateTimeFmt.zoneOrDevice(fromTimezone)
 fun FlightEntity.arrZone(): ZoneId = DateTimeFmt.zoneOrDevice(toTimezone)
 
+/** Google / FR24 "departed": runway takeoff, else gate off-block. */
+fun FlightEntity.observedDepAt(): Long? = runwayDepAt ?: actualDep
+
+/** Landing time: runway, else on-block. */
+fun FlightEntity.observedArrAt(): Long? = runwayArrAt ?: actualArr
+
 fun FlightEntity.zonesDifferFromDevice(): Boolean {
     val device = DateTimeFmt.deviceZone()
     return (fromTimezone != null && depZone() != device) || (toTimezone != null && arrZone() != device)

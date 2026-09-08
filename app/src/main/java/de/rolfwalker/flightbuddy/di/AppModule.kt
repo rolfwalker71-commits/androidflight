@@ -101,7 +101,7 @@ val appModule = module {
     single { WidgetUpdater(androidContext(), get()) }
     viewModel { HomeViewModel(get(), get()) }
     viewModel { AddFlightViewModel(get()) }
-    viewModel { params -> FlightDetailViewModel(params.get(), get(), get(), get()) }
+    viewModel { params -> FlightDetailViewModel(params.get(), get(), get(), get(), get()) }
     viewModel { MapViewModel(get(), get(), get()) }
     viewModel { LogbookViewModel(get()) }
     viewModel { AlertsViewModel(get()) }

@@ -90,6 +90,7 @@
     <string name="flight_adsb_none">No live ADS-B (no coverage)</string>
     <string name="flight_adsb_estimated">Position · estimate (no live ADS-B)</string>
     <string name="flight_adsb_estimated_last">Position · estimate · ADS-B last seen %1$s</string>
+    <string name="flight_refresh">Refresh</string>
     <string name="flight_delete">Delete flight</string>
     <string name="flight_delete_title">Delete flight?</string>
     <string name="flight_delete_body">%1$s will be removed from your list. Tracking and related alerts will stop.</string>

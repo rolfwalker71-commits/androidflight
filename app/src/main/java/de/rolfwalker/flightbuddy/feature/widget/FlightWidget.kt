@@ -53,6 +53,7 @@ import de.rolfwalker.flightbuddy.core.domain.airlineCodeForLogo
 import de.rolfwalker.flightbuddy.core.domain.airlineInitials
 import de.rolfwalker.flightbuddy.core.domain.airlineLogoUrl
 import de.rolfwalker.flightbuddy.core.domain.isEmergencySquawk
+import de.rolfwalker.flightbuddy.core.domain.observedDepAt
 import de.rolfwalker.flightbuddy.core.domain.isLiveStatus
 import de.rolfwalker.flightbuddy.core.domain.isPastStatus
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
@@ -734,7 +735,7 @@ internal data class DepClocks(
 )
 
 internal fun depClocks(f: FlightEntity): DepClocks {
-    val times = resolveLegTimes(f.scheduledDep, f.estimatedDep, f.actualDep)
+    val times = resolveLegTimes(f.scheduledDep, f.estimatedDep, f.observedDepAt())
     val delayed = f.status == FlightStatus.DELAYED ||
         (f.delayMinutes ?: 0) > 0 ||
         isLegDelayed(times, f.status == FlightStatus.DELAYED)

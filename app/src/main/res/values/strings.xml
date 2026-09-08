@@ -90,6 +90,7 @@
     <string name="flight_adsb_none">Kein Live-ADS-B (keine Abdeckung)</string>
     <string name="flight_adsb_estimated">Position · Schätzung (kein Live-ADS-B)</string>
     <string name="flight_adsb_estimated_last">Position · Schätzung · ADS-B zuletzt %1$s</string>
+    <string name="flight_refresh">Aktualisieren</string>
     <string name="flight_delete">Flug löschen</string>
     <string name="flight_delete_title">Flug löschen?</string>
     <string name="flight_delete_body">%1$s wird aus deiner Liste entfernt. Tracking und zugehörige Meldungen enden.</string>

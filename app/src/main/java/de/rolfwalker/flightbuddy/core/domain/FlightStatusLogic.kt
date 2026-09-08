@@ -24,6 +24,26 @@ fun isUpcomingDisplay(status: FlightStatus) =
 fun isAirborneDisplay(status: FlightStatus) =
     status == FlightStatus.DEPARTED || status == FlightStatus.EN_ROUTE
 
+/**
+ * Real flying telemetry — not a parked ADS-B hit at field elevation (ZRH ≈ 1416 ft, speed 0).
+ */
+fun isAirborneTelemetry(
+    altitudeFt: Double?,
+    velocityKts: Double?,
+    onGround: Boolean? = null,
+    fieldElevationFt: Double? = null,
+): Boolean {
+    if (onGround == true) return false
+    if (velocityKts != null && velocityKts < 50.0) return false
+    val elev = fieldElevationFt ?: 0.0
+    if (altitudeFt != null && altitudeFt < elev + 1_500.0 && (velocityKts == null || velocityKts < 120.0)) {
+        return false
+    }
+    if (velocityKts != null && velocityKts >= 80.0) return true
+    if (altitudeFt != null && altitudeFt >= elev + 2_500.0) return true
+    return false
+}
+
 /** First minutes after ATD/ETD — chip Gestartet, then Unterwegs. */
 const val JUST_DEPARTED_MS = 20L * 60 * 1000
 

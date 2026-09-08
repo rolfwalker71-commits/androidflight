@@ -7,6 +7,8 @@ import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.domain.arrZone
 import de.rolfwalker.flightbuddy.core.domain.depZone
 import de.rolfwalker.flightbuddy.core.domain.displayFlightNumber
+import de.rolfwalker.flightbuddy.core.domain.observedArrAt
+import de.rolfwalker.flightbuddy.core.domain.observedDepAt
 import de.rolfwalker.flightbuddy.core.domain.flightProgress
 import de.rolfwalker.flightbuddy.core.domain.haversineNm
 import de.rolfwalker.flightbuddy.core.domain.hasActuallyArrived
@@ -81,8 +83,8 @@ fun flightStatusCardModel(
         showRouteIata = showsRouteIata(bar),
         progressMarker = progressMarkerFor(bar, chip),
         progress = bar.percent.coerceIn(0, 100),
-        dep = legClock(f.scheduledDep, f.estimatedDep, f.actualDep, f.delayMinutes, shown, f.depZone()),
-        arr = legClock(f.scheduledArr, f.estimatedArr, f.actualArr, f.arrivalDelayMinutes, shown, f.arrZone()),
+        dep = legClock(f.scheduledDep, f.estimatedDep, f.observedDepAt(), f.delayMinutes, shown, f.depZone()),
+        arr = legClock(f.scheduledArr, f.estimatedArr, f.observedArrAt(), f.arrivalDelayMinutes, shown, f.arrZone()),
         weekday = if (showWeekday) DateTimeFmt.weekdayDate(f.scheduledDep) else null,
         depStand = standBits(context, f.terminal, f.gate, f.checkInDesk),
         arrStand = arrStandLine(context, f, showBaggage),
@@ -110,7 +112,7 @@ fun flightStatusChip(f: FlightEntity, shown: FlightStatus = displayFlightStatus(
 
 fun flightIsDelayed(f: FlightEntity): Boolean {
     if ((f.delayMinutes ?: 0) > 0) return true
-    val dep = resolveLegTimes(f.scheduledDep, f.estimatedDep, f.actualDep)
+    val dep = resolveLegTimes(f.scheduledDep, f.estimatedDep, f.observedDepAt())
     val arr = resolveLegTimes(f.scheduledArr, f.estimatedArr, f.actualArr)
     return isLegDelayed(dep, f.status == FlightStatus.DELAYED) ||
         isLegDelayed(arr, false)
@@ -228,10 +230,10 @@ fun displayFlightStatus(f: FlightEntity, now: Long = System.currentTimeMillis())
         status = f.status,
         scheduledDep = f.scheduledDep,
         estimatedDep = f.estimatedDep,
-        actualDep = f.actualDep,
+        actualDep = f.observedDepAt(),
         scheduledArr = f.scheduledArr,
         estimatedArr = f.estimatedArr,
-        actualArr = f.actualArr,
+        actualArr = f.observedArrAt(),
         delayMinutes = f.delayMinutes,
         now = now,
     )
@@ -408,8 +410,8 @@ fun flightProgressPercent(f: FlightEntity, now: Long = System.currentTimeMillis(
         scheduledArr = f.scheduledArr,
         estimatedDep = f.estimatedDep,
         estimatedArr = f.estimatedArr,
-        actualDep = f.actualDep,
-        actualArr = f.actualArr,
+        actualDep = f.observedDepAt(),
+        actualArr = f.observedArrAt(),
         now = now,
     )
     val geoRaw = airborneGeoProgress(origin, dest, lastFix, f, now)
@@ -441,8 +443,8 @@ private fun airborneGeoProgress(
         scheduledArr = f.scheduledArr,
         estimatedDep = f.estimatedDep,
         estimatedArr = f.estimatedArr,
-        actualDep = f.actualDep,
-        actualArr = f.actualArr,
+        actualDep = f.observedDepAt(),
+        actualArr = f.observedArrAt(),
         now = now,
     )
 }
@@ -453,10 +455,10 @@ fun statusBarForFlight(f: FlightEntity, now: Long = System.currentTimeMillis()):
         status = shown,
         scheduledDep = f.scheduledDep,
         estimatedDep = f.estimatedDep,
-        actualDep = f.actualDep,
+        actualDep = f.observedDepAt(),
         scheduledArr = f.scheduledArr,
         estimatedArr = f.estimatedArr,
-        actualArr = f.actualArr,
+        actualArr = f.observedArrAt(),
         flightPct = flightProgressPercent(f, now),
         now = now,
         delayMinutes = f.delayMinutes,

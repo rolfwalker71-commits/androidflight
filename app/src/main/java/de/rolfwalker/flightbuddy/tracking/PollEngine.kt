@@ -1,5 +1,6 @@
 package de.rolfwalker.flightbuddy.tracking
 
+import de.rolfwalker.flightbuddy.core.DateTimeFmt
 import de.rolfwalker.flightbuddy.core.data.FlightRepository
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.data.db.ObjectEventEntity
@@ -9,8 +10,14 @@ import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
 import de.rolfwalker.flightbuddy.core.data.toLocalDate
 import de.rolfwalker.flightbuddy.core.data.toPollInput
 import de.rolfwalker.flightbuddy.core.domain.LIVE_FIX_STALE_MS
+import de.rolfwalker.flightbuddy.core.domain.callsignMatches
+import de.rolfwalker.flightbuddy.core.domain.callsignPrefix
+import de.rolfwalker.flightbuddy.core.domain.compactCallsign
+import de.rolfwalker.flightbuddy.core.domain.liveCallsignCandidates
+import de.rolfwalker.flightbuddy.core.domain.preferredIcaoCallsign
 import de.rolfwalker.flightbuddy.core.domain.PREFLIGHT_WINDOW_MS
 import de.rolfwalker.flightbuddy.core.domain.hasActuallyArrived
+import de.rolfwalker.flightbuddy.core.domain.isAirborneTelemetry
 import de.rolfwalker.flightbuddy.core.domain.intervalForFlight
 import de.rolfwalker.flightbuddy.core.domain.isEmergencySquawk
 import de.rolfwalker.flightbuddy.core.domain.isTerminalStatus
@@ -21,13 +28,13 @@ import de.rolfwalker.flightbuddy.core.domain.resolveDisplayStatus
 import de.rolfwalker.flightbuddy.core.domain.resolvePollPhase
 import de.rolfwalker.flightbuddy.core.domain.shouldAlertEmergencySquawk
 import de.rolfwalker.flightbuddy.core.domain.statusAfterGroundFix
+import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.model.PollPhase
 import de.rolfwalker.flightbuddy.core.model.SearchReason
 import de.rolfwalker.flightbuddy.core.network.LiveFix
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
 import kotlinx.coroutines.flow.first
-import java.time.ZoneOffset
 
 data class PollOutcome(
     val flightId: String,
@@ -50,7 +57,7 @@ class PollEngine(
         return due.map { pollFlight(it) }
     }
 
-    suspend fun pollFlight(row: FlightEntity): PollOutcome {
+    suspend fun pollFlight(row: FlightEntity, forceLive: Boolean = false): PollOutcome {
         val keys = keysStore.snapshot()
         val prefs = prefsStore.flow.first()
         val prev = row.copy()
@@ -58,35 +65,20 @@ class PollEngine(
         val phase = resolvePollPhase(row.toPollInput())
 
         if (phase == PollPhase.INACTIVE || phase == PollPhase.PREFLIGHT || phase == PollPhase.AIRBORNE) {
-            val date = row.scheduledDep.toLocalDate(ZoneOffset.UTC)
-            val aero = providers.searchAeroNumber(keys, row.flightNumber, date, user = false)
+            val date = row.scheduledDep.toLocalDate(DateTimeFmt.zoneOrDevice(row.fromTimezone))
+            val aero = providers.searchAeroNumber(keys, row.flightNumber, date, user = true)
             if (aero.reason == SearchReason.OK) {
-                val match = aero.flights
-                    .filter { candidate ->
-                        (row.fromIata == null || candidate.fromIata == row.fromIata) &&
-                            (row.toIata == null || candidate.toIata == row.toIata || candidate.toIata != null)
-                    }
-                    .minByOrNull { candidate ->
-                        kotlin.math.abs((candidate.scheduledDep ?: Long.MAX_VALUE) - row.scheduledDep)
-                    }
-                    ?.takeIf { candidate ->
-                        val dep = candidate.scheduledDep
-                        dep == null || kotlin.math.abs(dep - row.scheduledDep) < 12 * 60 * 60 * 1000
-                    }
-                    ?: aero.flights.firstOrNull { candidate ->
-                        val dep = candidate.scheduledDep
-                        dep != null && kotlin.math.abs(dep - row.scheduledDep) < 12 * 60 * 60 * 1000
-                    }
+                val match = pickAeroMatch(aero.flights, row)
                 if (match != null) {
                     val destChanged = match.toIata != null && row.toIata != null && match.toIata != row.toIata
                     val merged = mergeAeroFlightStatus(
                         current = next.status,
                         aeroStatus = match.status,
                         destinationChanged = destChanged,
-                        actualArr = match.actualArr ?: next.actualArr,
+                        actualArr = match.actualArr ?: match.runwayArrAt ?: next.actualArr,
                         scheduledDep = next.scheduledDep,
                         estimatedDep = match.estimatedDep ?: next.estimatedDep,
-                        actualDep = match.actualDep ?: next.actualDep,
+                        actualDep = match.actualDep ?: match.runwayDepAt ?: next.actualDep,
                         scheduledArr = next.scheduledArr ?: match.scheduledArr,
                         estimatedArr = match.estimatedArr ?: next.estimatedArr,
                         delayMinutes = match.delayMinutes ?: next.delayMinutes,
@@ -108,8 +100,8 @@ class PollEngine(
                         isCargo = match.isCargo ?: next.isCargo,
                         estimatedDep = match.estimatedDep ?: next.estimatedDep,
                         estimatedArr = match.estimatedArr ?: next.estimatedArr,
-                        actualDep = match.actualDep ?: next.actualDep,
-                        actualArr = match.actualArr ?: next.actualArr,
+                        actualDep = match.actualDep ?: match.runwayDepAt ?: next.actualDep,
+                        actualArr = match.actualArr ?: match.runwayArrAt ?: next.actualArr,
                         runwayDepAt = match.runwayDepAt ?: next.runwayDepAt,
                         runwayArrAt = match.runwayArrAt ?: next.runwayArrAt,
                         scheduledArr = next.scheduledArr ?: match.scheduledArr,
@@ -124,9 +116,43 @@ class PollEngine(
                         aircraftType = match.aircraftType ?: next.aircraftType,
                         registration = match.registration ?: next.registration,
                         icao24 = match.icao24 ?: next.icao24,
-                        callsign = match.callsign ?: next.callsign,
+                        callsign = match.callsign ?: next.callsign ?: preferredIcaoCallsign(
+                            next.flightNumber, match.callsign, match.airlineIcao ?: next.airlineIcao, match.airlineIata ?: next.airlineIata,
+                        ),
                         lastStatusSource = "aerodatabox",
                     )
+                    val aeroLat = match.liveLat
+                    val aeroLon = match.liveLon
+                    if (aeroLat != null && aeroLon != null) {
+                        persistFix(
+                            next.id,
+                            LiveFix(
+                                lat = aeroLat,
+                                lon = aeroLon,
+                                altitudeFt = match.liveAltitudeFt,
+                                velocityKts = match.liveVelocityKts,
+                                heading = match.liveHeading,
+                                verticalRateFpm = match.liveVerticalRateFpm,
+                                source = "aerodatabox",
+                                icao24 = match.icao24,
+                                callsign = match.callsign,
+                            ),
+                        )
+                        val flying = (match.liveAltitudeFt != null && match.liveAltitudeFt > 200) ||
+                            (match.liveVelocityKts != null && match.liveVelocityKts > 80)
+                        next = next.copy(
+                            status = if (flying && !isTerminalStatus(next.status)) FlightStatus.EN_ROUTE else next.status,
+                            lastLat = aeroLat,
+                            lastLon = aeroLon,
+                            lastAltitudeFt = match.liveAltitudeFt ?: next.lastAltitudeFt,
+                            lastVelocityKts = match.liveVelocityKts ?: next.lastVelocityKts,
+                            lastHeading = match.liveHeading ?: next.lastHeading,
+                            lastVerticalRateFpm = match.liveVerticalRateFpm ?: next.lastVerticalRateFpm,
+                            lastPositionAt = System.currentTimeMillis(),
+                            icao24 = match.icao24 ?: next.icao24,
+                            lastStatusSource = "aerodatabox",
+                        )
+                    }
                 }
             }
         }
@@ -134,13 +160,34 @@ class PollEngine(
         val airborne = resolvePollPhase(next.toPollInput()) == PollPhase.AIRBORNE
         var gotFix = false
         if (airborne) {
-            val states = providers.fetchOpenSky(keys, icao24 = next.icao24)
-            val state = states.firstOrNull { it.icao24 == next.icao24?.lowercase() }
-                ?: states.firstOrNull { cs ->
-                    val call = cs.callsign?.replace(" ", "")?.uppercase()
-                    val want = listOfNotNull(next.callsign, next.flightNumber).map { it.replace(" ", "").uppercase() }
-                    call != null && want.any { call.startsWith(it) || it.startsWith(call) }
+            val signs = liveCallsignCandidates(next.flightNumber, next.callsign, next.airlineIcao, next.airlineIata)
+            val states = if (!next.icao24.isNullOrBlank()) {
+                providers.fetchOpenSky(keys, icao24 = next.icao24, ignoreInterval = forceLive)
+            } else {
+                val lat = next.lastLat
+                val lon = next.lastLon
+                if (lat != null && lon != null) {
+                    providers.fetchOpenSky(
+                        keys,
+                        lamin = (lat - 3.0).coerceAtLeast(-90.0),
+                        lamax = (lat + 3.0).coerceAtMost(90.0),
+                        lomin = (lon - 3.0).coerceAtLeast(-180.0),
+                        lomax = (lon + 3.0).coerceAtMost(180.0),
+                        ignoreInterval = forceLive,
+                    )
+                } else {
+                    emptyList()
                 }
+            }
+            val depAt = next.actualDep ?: next.runwayDepAt ?: next.estimatedDep ?: next.scheduledDep
+            val expectAirborne = System.currentTimeMillis() - depAt > 8L * 60 * 1000
+            val hexHit = states.firstOrNull { it.icao24 == next.icao24?.lowercase() }
+            val callHit = states.firstOrNull { cs -> callsignMatches(cs.callsign, signs) }
+            val state = listOfNotNull(hexHit, callHit).firstOrNull { hit ->
+                isAirborneTelemetry(hit.altitudeFt, hit.velocityKts, hit.onGround)
+            } ?: listOfNotNull(hexHit, callHit).firstOrNull { hit ->
+                !expectAirborne && (hit == callHit || callsignMatches(hit.callsign, signs))
+            }
             if (state != null) {
                 val squawk = normalizeSquawk(state.squawk)
                 val status = if (state.onGround) {
@@ -174,28 +221,67 @@ class PollEngine(
                 )
                 gotFix = true
             } else {
-                val live = providers.lookupAeroLive(keys, next.flightNumber, next.scheduledDep.toLocalDate(ZoneOffset.UTC))
-                val liveLat = live?.liveLat ?: live?.fromLat
-                val liveLon = live?.liveLon ?: live?.fromLon
+                if (expectAirborne &&
+                    hexHit != null &&
+                    !isAirborneTelemetry(hexHit.altitudeFt, hexHit.velocityKts, hexHit.onGround) &&
+                    !callsignMatches(hexHit.callsign, signs)
+                ) {
+                    next = next.copy(icao24 = null)
+                }
+            }
+            if (state == null && (next.lastPositionAt == null || System.currentTimeMillis() - next.lastPositionAt!! > LIVE_FIX_STALE_MS)) {
+                val live = providers.lookupAeroLive(
+                    keys,
+                    next.flightNumber,
+                    next.scheduledDep.toLocalDate(DateTimeFmt.zoneOrDevice(next.fromTimezone)),
+                )
+                val liveLat = live?.liveLat
+                val liveLon = live?.liveLon
                 if (liveLat != null && liveLon != null) {
                     persistFix(
                         next.id,
-                        LiveFix(lat = liveLat, lon = liveLon, source = "aerodatabox", icao24 = live?.icao24, callsign = live?.callsign),
+                        LiveFix(
+                            lat = liveLat,
+                            lon = liveLon,
+                            altitudeFt = live.liveAltitudeFt,
+                            velocityKts = live.liveVelocityKts,
+                            heading = live.liveHeading,
+                            verticalRateFpm = live.liveVerticalRateFpm,
+                            source = "aerodatabox",
+                            icao24 = live.icao24,
+                            callsign = live.callsign,
+                        ),
                     )
+                    val flying = isAirborneTelemetry(live.liveAltitudeFt, live.liveVelocityKts)
                     next = next.copy(
-                        status = if (!isTerminalStatus(next.status)) FlightStatus.EN_ROUTE else next.status,
+                        status = if (flying && !isTerminalStatus(next.status)) FlightStatus.EN_ROUTE else next.status,
                         lastLat = liveLat,
                         lastLon = liveLon,
+                        lastAltitudeFt = live.liveAltitudeFt ?: next.lastAltitudeFt,
+                        lastVelocityKts = live.liveVelocityKts ?: next.lastVelocityKts,
+                        lastHeading = live.liveHeading ?: next.lastHeading,
+                        lastVerticalRateFpm = live.liveVerticalRateFpm ?: next.lastVerticalRateFpm,
                         lastPositionAt = System.currentTimeMillis(),
-                        icao24 = live?.icao24 ?: next.icao24,
+                        icao24 = live.icao24 ?: next.icao24,
                         lastStatusSource = "aerodatabox",
                     )
                     gotFix = true
                 }
             }
             val stale = next.lastPositionAt == null || System.currentTimeMillis() - next.lastPositionAt!! > LIVE_FIX_STALE_MS
-            if (!gotFix && stale) {
-                val fr24 = providers.fetchFr24(keys, next.flightNumber, next.callsign, next.icao24, next.lastLat, next.lastLon)
+            val flyingNow = isAirborneTelemetry(next.lastAltitudeFt, next.lastVelocityKts, next.lastOnGround)
+            if ((!gotFix && stale) || !flyingNow) {
+                val fr24 = providers.fetchFr24(
+                    keys,
+                    next.flightNumber,
+                    signs.filter { compactCallsign(it).let { c -> callsignPrefix(c)?.length == 3 } }
+                        .joinToString(","),
+                    if (expectAirborne && !flyingNow) null else next.icao24,
+                    next.lastLat,
+                    next.lastLon,
+                    next.registration,
+                    ignoreInterval = forceLive,
+                )
                 if (fr24 != null) {
                     persistFix(next.id, fr24)
                     next = next.copy(
@@ -256,12 +342,27 @@ class PollEngine(
     }
 
     private fun landingWindowOpen(row: FlightEntity, now: Long): Boolean {
-        val dep = row.actualDep ?: row.estimatedDep ?: row.scheduledDep
+        val dep = row.actualDep ?: row.runwayDepAt ?: row.estimatedDep ?: row.scheduledDep
         if (now < dep) return false
         val minBlock = minPlausibleFlightMs(
             row.scheduledDep, row.estimatedDep, row.actualDep, row.scheduledArr, row.estimatedArr,
         )
         return now >= dep + minBlock
+    }
+
+    private fun pickAeroMatch(candidates: List<FlightSearchResult>, row: FlightEntity): FlightSearchResult? {
+        val route = candidates.filter { c ->
+            (row.fromIata == null || c.fromIata == row.fromIata) &&
+                (row.toIata == null || c.toIata == null || c.toIata == row.toIata)
+        }.ifEmpty { candidates }
+        val window = 18L * 60 * 60 * 1000
+        return route.mapNotNull { c ->
+            val dep = c.scheduledDep ?: return@mapNotNull null
+            val delta = kotlin.math.abs(dep - row.scheduledDep)
+            if (delta >= window) return@mapNotNull null
+            val staleLanded = isTerminalStatus(c.status) && !isTerminalStatus(row.status)
+            c to (delta + if (staleLanded) window else 0L)
+        }.minByOrNull { it.second }?.first
     }
 
     /** On-ground at the gate before / just after dep is not a landing. */
@@ -272,10 +373,10 @@ class PollEngine(
                 status = row.status,
                 scheduledDep = row.scheduledDep,
                 estimatedDep = row.estimatedDep,
-                actualDep = row.actualDep,
+                actualDep = row.actualDep ?: row.runwayDepAt,
                 scheduledArr = row.scheduledArr,
                 estimatedArr = row.estimatedArr,
-                actualArr = row.actualArr,
+                actualArr = row.actualArr ?: row.runwayArrAt,
                 delayMinutes = row.delayMinutes,
                 now = now,
             )

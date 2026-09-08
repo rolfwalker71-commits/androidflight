@@ -72,6 +72,7 @@ import de.rolfwalker.flightbuddy.core.model.MapStyleId
 import de.rolfwalker.flightbuddy.core.ui.AirlineLogo
 import de.rolfwalker.flightbuddy.core.ui.StatusBadge
 import de.rolfwalker.flightbuddy.core.ui.TonalCard
+import de.rolfwalker.flightbuddy.core.ui.status.displayFlightStatus
 import de.rolfwalker.flightbuddy.core.ui.formatTrafficLevel
 import de.rolfwalker.flightbuddy.core.ui.formatTrafficSpeedKt
 import de.rolfwalker.flightbuddy.core.domain.initialBearing
@@ -699,7 +700,7 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
-                            StatusBadge(f.status, f.delayMinutes)
+                            StatusBadge(displayFlightStatus(f), f.delayMinutes)
                         }
                     }
                 }
@@ -760,7 +761,7 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
         if (tablet && selected != null) {
             Column(Modifier.weight(0.4f).padding(12.dp)) {
                 Text(displayFlightNumber(selected.flightNumber), style = MaterialTheme.typography.headlineSmall)
-                StatusBadge(selected.status, selected.delayMinutes)
+                StatusBadge(displayFlightStatus(selected), selected.delayMinutes)
                 Text("${selected.fromCity} → ${selected.toCity}")
                 Text(DateTimeFmt.dateTime(selected.scheduledDep, DateTimeFmt.deviceZone()))
             }

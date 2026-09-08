@@ -64,6 +64,10 @@ data class FlightSearchResult(
     val toCountry: String? = null,
     val liveLat: Double? = null,
     val liveLon: Double? = null,
+    val liveAltitudeFt: Double? = null,
+    val liveVelocityKts: Double? = null,
+    val liveHeading: Double? = null,
+    val liveVerticalRateFpm: Double? = null,
     val source: String = "aerodatabox",
     val timesEstimated: Boolean = false,
 )

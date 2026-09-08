@@ -8,6 +8,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.feature.widget.WidgetUpdater
@@ -84,14 +85,16 @@ class FlightTrackerService : Service() {
             }
             try {
                 wakeLock?.acquire(3 * 60_000L)
-                val outcomes = engine.pollDueFlights()
+                engine.pollDueFlights()
                 engine.pollTrackedObjects()
-                widgets.updateAll(outcomes.map { it.flightId }.toSet())
             } catch (_: Exception) {
             } finally {
                 if (wakeLock?.isHeld == true) wakeLock?.release()
             }
-            delay(engine.nextWakeDelayMs())
+            // Always repaint every pinned card so countdown / progress / chip stay live
+            // even when this cycle had no API change for that flight.
+            runCatching { widgets.updateAll() }
+            delay(minOf(engine.nextWakeDelayMs(), WIDGET_TICK_MS))
         }
     }
 
@@ -103,9 +106,19 @@ class FlightTrackerService : Service() {
     }
 
     companion object {
+        private const val TAG = "FlightBuddy/Tracker"
+        /** Recompute chip, countdown, and plane at least this often while tracking. */
+        private const val WIDGET_TICK_MS = 45_000L
+
         fun start(context: Context) {
             val i = Intent(context, FlightTrackerService::class.java)
-            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i)
+            try {
+                if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i)
+            } catch (e: Exception) {
+                // Widget / boot / background process start is not allowed to
+                // promote an FGS. Swallow so the host process (and widgets) stay up.
+                Log.w(TAG, "startForegroundService blocked", e)
+            }
         }
 
         fun stop(context: Context) {

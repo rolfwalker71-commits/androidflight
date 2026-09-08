@@ -12,6 +12,20 @@ fun isPastStatus(status: FlightStatus) = status in PAST_STATUSES
 fun isTerminalStatus(status: FlightStatus) =
     status == FlightStatus.LANDED || status == FlightStatus.CANCELLED || status == FlightStatus.DIVERTED
 
+/** Home Kommend: not yet departed (includes Boarding / Verspätet on the ground). */
+fun isUpcomingDisplay(status: FlightStatus) =
+    status == FlightStatus.SCHEDULED ||
+        status == FlightStatus.DELAYED ||
+        status == FlightStatus.BOARDING ||
+        status == FlightStatus.UNKNOWN
+
+/** Home Live: departed, not arrived. */
+fun isAirborneDisplay(status: FlightStatus) =
+    status == FlightStatus.DEPARTED || status == FlightStatus.EN_ROUTE
+
+/** First minutes after ATD/ETD — chip Gestartet, then Unterwegs. */
+const val JUST_DEPARTED_MS = 20L * 60 * 1000
+
 fun statusAfterGroundFix(current: FlightStatus): FlightStatus = when (current) {
     FlightStatus.CANCELLED -> current
     FlightStatus.DIVERTED -> FlightStatus.DIVERTED
@@ -26,20 +40,179 @@ fun mergeAeroFlightStatus(
     destinationChanged: Boolean,
     actualArr: Long?,
     now: Long = System.currentTimeMillis(),
+    scheduledDep: Long? = null,
+    estimatedDep: Long? = null,
+    actualDep: Long? = null,
+    scheduledArr: Long? = null,
+    estimatedArr: Long? = null,
+    delayMinutes: Int? = null,
 ): FlightStatus {
-    val arrived = actualArr != null && actualArr <= now
+    val arrived = if (scheduledDep != null) {
+        hasActuallyArrived(
+            status = aeroStatus,
+            scheduledDep = scheduledDep,
+            estimatedDep = estimatedDep,
+            actualDep = actualDep,
+            scheduledArr = scheduledArr,
+            estimatedArr = estimatedArr,
+            actualArr = actualArr,
+            now = now,
+        )
+    } else {
+        actualArr != null && actualArr <= now
+    }
     if (aeroStatus == FlightStatus.CANCELLED) return FlightStatus.CANCELLED
     if (aeroStatus == FlightStatus.DIVERTED || destinationChanged) {
-        if (arrived || aeroStatus == FlightStatus.LANDED) return FlightStatus.DIVERTED
+        if (arrived) return FlightStatus.DIVERTED
+        if (aeroStatus == FlightStatus.LANDED && !arrived) {
+            return if (current == FlightStatus.DEPARTED) FlightStatus.DEPARTED else FlightStatus.EN_ROUTE
+        }
         if (aeroStatus == FlightStatus.DEPARTED) return FlightStatus.DEPARTED
         if (isLiveStatus(current) || current == FlightStatus.DELAYED) {
             return if (current == FlightStatus.DEPARTED) FlightStatus.DEPARTED else FlightStatus.EN_ROUTE
         }
         return FlightStatus.EN_ROUTE
     }
+    if (aeroStatus == FlightStatus.LANDED && scheduledDep != null && !arrived) {
+        return resolveDisplayStatus(
+            status = current,
+            scheduledDep = scheduledDep,
+            estimatedDep = estimatedDep,
+            actualDep = actualDep,
+            scheduledArr = scheduledArr,
+            estimatedArr = estimatedArr,
+            actualArr = actualArr,
+            delayMinutes = delayMinutes,
+            now = now,
+        )
+    }
     if (aeroStatus != FlightStatus.UNKNOWN) return aeroStatus
     if (arrived && !isTerminalStatus(current)) return FlightStatus.LANDED
     return current
+}
+
+/** Minimum airborne time before a "landed" flag is believable when block time is unknown. */
+private const val FALLBACK_MIN_BLOCK_MS = 90L * 60 * 1000
+private const val ABSOLUTE_MIN_BLOCK_MS = 20L * 60 * 1000
+
+internal fun effectiveDepartureMs(
+    scheduledDep: Long,
+    estimatedDep: Long?,
+    actualDep: Long?,
+    delayMinutes: Int? = null,
+): Long = actualDep
+    ?: estimatedDep
+    ?: delayMinutes?.takeIf { it > 0 }?.let { scheduledDep + it * 60_000L }
+    ?: scheduledDep
+
+internal fun effectiveArrivalMs(
+    scheduledArr: Long?,
+    estimatedArr: Long?,
+    actualArr: Long?,
+): Long? = actualArr ?: estimatedArr ?: scheduledArr
+
+internal fun scheduledBlockMs(
+    scheduledDep: Long,
+    estimatedDep: Long?,
+    actualDep: Long?,
+    scheduledArr: Long?,
+    estimatedArr: Long?,
+): Long? {
+    val dep = scheduledDep
+    val arr = scheduledArr ?: estimatedArr
+    val fromSched = arr?.let { it - dep }?.takeIf { it >= ABSOLUTE_MIN_BLOCK_MS }
+    if (fromSched != null) return fromSched
+    val effDep = effectiveDepartureMs(scheduledDep, estimatedDep, actualDep)
+    return estimatedArr?.let { it - effDep }?.takeIf { it >= ABSOLUTE_MIN_BLOCK_MS }
+}
+
+internal fun minPlausibleFlightMs(
+    scheduledDep: Long,
+    estimatedDep: Long?,
+    actualDep: Long?,
+    scheduledArr: Long?,
+    estimatedArr: Long?,
+): Long {
+    val block = scheduledBlockMs(scheduledDep, estimatedDep, actualDep, scheduledArr, estimatedArr)
+    return block?.let { (it * 0.4).toLong().coerceAtLeast(ABSOLUTE_MIN_BLOCK_MS) }
+        ?: FALLBACK_MIN_BLOCK_MS
+}
+
+/**
+ * True only when the aircraft has really arrived.
+ * Stale AeroDataBox/ADS-B "landed" is ignored when departure is still ahead
+ * or just happened and arrival is still in the future.
+ */
+fun hasActuallyArrived(
+    status: FlightStatus,
+    scheduledDep: Long,
+    estimatedDep: Long?,
+    actualDep: Long?,
+    scheduledArr: Long?,
+    estimatedArr: Long?,
+    actualArr: Long?,
+    now: Long,
+): Boolean {
+    val dep = effectiveDepartureMs(scheduledDep, estimatedDep, actualDep)
+    if (now < dep) return false
+    val minBlock = minPlausibleFlightMs(
+        scheduledDep, estimatedDep, actualDep, scheduledArr, estimatedArr,
+    )
+    if (now < dep + minBlock) {
+        return actualArr != null && actualArr <= now && actualArr >= dep
+    }
+    if (actualArr != null && actualArr <= now && actualArr >= dep) return true
+    val eta = effectiveArrivalMs(scheduledArr, estimatedArr, actualArr)
+    if (eta != null && eta >= dep && now >= eta) return true
+    if (status == FlightStatus.LANDED) {
+        if (eta != null && now < eta) return false
+        return true
+    }
+    return false
+}
+
+/**
+ * Display / widget status from times + duration, not a stale landed flag.
+ * Pill and progress bar must use this — never raw [FlightStatus.LANDED] alone.
+ */
+fun resolveDisplayStatus(
+    status: FlightStatus,
+    scheduledDep: Long,
+    estimatedDep: Long?,
+    actualDep: Long?,
+    scheduledArr: Long?,
+    estimatedArr: Long?,
+    actualArr: Long?,
+    delayMinutes: Int? = null,
+    now: Long = System.currentTimeMillis(),
+): FlightStatus {
+    if (status == FlightStatus.CANCELLED) return FlightStatus.CANCELLED
+    val arrived = hasActuallyArrived(
+        status = status,
+        scheduledDep = scheduledDep,
+        estimatedDep = estimatedDep,
+        actualDep = actualDep,
+        scheduledArr = scheduledArr,
+        estimatedArr = estimatedArr,
+        actualArr = actualArr,
+        now = now,
+    )
+    if (arrived) {
+        return if (status == FlightStatus.DIVERTED) FlightStatus.DIVERTED else FlightStatus.LANDED
+    }
+    if (status == FlightStatus.DIVERTED) return FlightStatus.DIVERTED
+    val dep = effectiveDepartureMs(scheduledDep, estimatedDep, actualDep, delayMinutes)
+    val departed = (actualDep != null && actualDep <= now) || now >= dep
+    if (departed) {
+        return if (now - dep < JUST_DEPARTED_MS) FlightStatus.DEPARTED else FlightStatus.EN_ROUTE
+    }
+    if (status == FlightStatus.BOARDING) return FlightStatus.BOARDING
+    val delayed = status == FlightStatus.DELAYED ||
+        (delayMinutes ?: 0) > 0 ||
+        ((estimatedDep ?: actualDep)?.let { it > scheduledDep } == true)
+    if (delayed) return FlightStatus.DELAYED
+    if (status == FlightStatus.LANDED || status == FlightStatus.UNKNOWN) return FlightStatus.SCHEDULED
+    return status
 }
 
 fun mapProviderStatus(raw: String?): FlightStatus {

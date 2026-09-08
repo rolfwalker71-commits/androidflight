@@ -129,6 +129,7 @@ class FlightRepository(
             terminal = result.terminal,
             arrivalGate = result.arrivalGate,
             arrivalTerminal = result.arrivalTerminal,
+            baggageBelt = result.baggageBelt,
             delayMinutes = result.delayMinutes,
             aircraftType = result.aircraftType,
             registration = result.registration,

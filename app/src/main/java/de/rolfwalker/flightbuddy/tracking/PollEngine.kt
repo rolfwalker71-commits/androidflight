@@ -10,11 +10,14 @@ import de.rolfwalker.flightbuddy.core.data.toLocalDate
 import de.rolfwalker.flightbuddy.core.data.toPollInput
 import de.rolfwalker.flightbuddy.core.domain.LIVE_FIX_STALE_MS
 import de.rolfwalker.flightbuddy.core.domain.PREFLIGHT_WINDOW_MS
+import de.rolfwalker.flightbuddy.core.domain.hasActuallyArrived
 import de.rolfwalker.flightbuddy.core.domain.intervalForFlight
 import de.rolfwalker.flightbuddy.core.domain.isEmergencySquawk
 import de.rolfwalker.flightbuddy.core.domain.isTerminalStatus
 import de.rolfwalker.flightbuddy.core.domain.mergeAeroFlightStatus
+import de.rolfwalker.flightbuddy.core.domain.minPlausibleFlightMs
 import de.rolfwalker.flightbuddy.core.domain.normalizeSquawk
+import de.rolfwalker.flightbuddy.core.domain.resolveDisplayStatus
 import de.rolfwalker.flightbuddy.core.domain.resolvePollPhase
 import de.rolfwalker.flightbuddy.core.domain.shouldAlertEmergencySquawk
 import de.rolfwalker.flightbuddy.core.domain.statusAfterGroundFix
@@ -57,12 +60,22 @@ class PollEngine(
             val date = row.scheduledDep.toLocalDate(ZoneOffset.UTC)
             val aero = providers.searchAeroNumber(keys, row.flightNumber, date, user = false)
             if (aero.reason == SearchReason.OK) {
-                val match = aero.flights.firstOrNull { candidate ->
-                    val sameRoute = (row.fromIata == null || candidate.fromIata == row.fromIata) &&
-                        (row.toIata == null || candidate.toIata == row.toIata || candidate.toIata != null)
-                    val dep = candidate.scheduledDep
-                    sameRoute && (dep == null || kotlin.math.abs(dep - row.scheduledDep) < 36 * 60 * 60 * 1000)
-                } ?: aero.flights.firstOrNull()
+                val match = aero.flights
+                    .filter { candidate ->
+                        (row.fromIata == null || candidate.fromIata == row.fromIata) &&
+                            (row.toIata == null || candidate.toIata == row.toIata || candidate.toIata != null)
+                    }
+                    .minByOrNull { candidate ->
+                        kotlin.math.abs((candidate.scheduledDep ?: Long.MAX_VALUE) - row.scheduledDep)
+                    }
+                    ?.takeIf { candidate ->
+                        val dep = candidate.scheduledDep
+                        dep == null || kotlin.math.abs(dep - row.scheduledDep) < 12 * 60 * 60 * 1000
+                    }
+                    ?: aero.flights.firstOrNull { candidate ->
+                        val dep = candidate.scheduledDep
+                        dep != null && kotlin.math.abs(dep - row.scheduledDep) < 12 * 60 * 60 * 1000
+                    }
                 if (match != null) {
                     val destChanged = match.toIata != null && row.toIata != null && match.toIata != row.toIata
                     val merged = mergeAeroFlightStatus(
@@ -70,6 +83,12 @@ class PollEngine(
                         aeroStatus = match.status,
                         destinationChanged = destChanged,
                         actualArr = match.actualArr ?: next.actualArr,
+                        scheduledDep = next.scheduledDep,
+                        estimatedDep = match.estimatedDep ?: next.estimatedDep,
+                        actualDep = match.actualDep ?: next.actualDep,
+                        scheduledArr = next.scheduledArr ?: match.scheduledArr,
+                        estimatedArr = match.estimatedArr ?: next.estimatedArr,
+                        delayMinutes = match.delayMinutes ?: next.delayMinutes,
                     )
                     if (destChanged && match.toIata != null) {
                         repo.upsertAirport(match.toIata, match.toCity, match.toTimezone, match.toLat, match.toLon)
@@ -80,6 +99,7 @@ class PollEngine(
                         terminal = match.terminal ?: next.terminal,
                         arrivalGate = match.arrivalGate ?: next.arrivalGate,
                         arrivalTerminal = match.arrivalTerminal ?: next.arrivalTerminal,
+                        baggageBelt = match.baggageBelt ?: next.baggageBelt,
                         delayMinutes = match.delayMinutes ?: next.delayMinutes,
                         estimatedDep = match.estimatedDep ?: next.estimatedDep,
                         estimatedArr = match.estimatedArr ?: next.estimatedArr,
@@ -112,7 +132,11 @@ class PollEngine(
                 }
             if (state != null) {
                 val squawk = normalizeSquawk(state.squawk)
-                val status = if (state.onGround) statusAfterGroundFix(next.status) else FlightStatus.EN_ROUTE
+                val status = if (state.onGround) {
+                    groundStatusOrKeep(next)
+                } else {
+                    FlightStatus.EN_ROUTE
+                }
                 persistFix(
                     next.id,
                     LiveFix(
@@ -160,7 +184,7 @@ class PollEngine(
                 if (fr24 != null) {
                     persistFix(next.id, fr24)
                     next = next.copy(
-                        status = if (fr24.onGround) statusAfterGroundFix(next.status) else FlightStatus.EN_ROUTE,
+                        status = if (fr24.onGround) groundStatusOrKeep(next) else FlightStatus.EN_ROUTE,
                         lastLat = fr24.lat,
                         lastLon = fr24.lon,
                         lastAltitudeFt = fr24.altitudeFt,
@@ -176,9 +200,19 @@ class PollEngine(
             }
             if (!isTerminalStatus(next.status)) {
                 val now = System.currentTimeMillis()
-                if (next.actualArr != null && next.actualArr!! <= now) {
+                val arrived = hasActuallyArrived(
+                    status = next.status,
+                    scheduledDep = next.scheduledDep,
+                    estimatedDep = next.estimatedDep,
+                    actualDep = next.actualDep,
+                    scheduledArr = next.scheduledArr,
+                    estimatedArr = next.estimatedArr,
+                    actualArr = next.actualArr,
+                    now = now,
+                )
+                if (arrived) {
                     next = next.copy(status = if (next.toIata != prev.toIata) FlightStatus.DIVERTED else FlightStatus.LANDED)
-                } else if (next.lastOnGround == true) {
+                } else if (next.lastOnGround == true && landingWindowOpen(next, now)) {
                     next = next.copy(status = statusAfterGroundFix(next.status))
                 }
             }
@@ -194,6 +228,34 @@ class PollEngine(
         alerts.dispatchFlightChanges(prev, next, prefs)
         alerts.dispatchTimeReminders(next, prefs)
         return PollOutcome(next.id, prev.status != next.status || prev.gate != next.gate || prev.lastSquawk != next.lastSquawk, next.status)
+    }
+
+    private fun landingWindowOpen(row: FlightEntity, now: Long): Boolean {
+        val dep = row.actualDep ?: row.estimatedDep ?: row.scheduledDep
+        if (now < dep) return false
+        val minBlock = minPlausibleFlightMs(
+            row.scheduledDep, row.estimatedDep, row.actualDep, row.scheduledArr, row.estimatedArr,
+        )
+        return now >= dep + minBlock
+    }
+
+    /** On-ground at the gate before / just after dep is not a landing. */
+    private fun groundStatusOrKeep(row: FlightEntity): FlightStatus {
+        val now = System.currentTimeMillis()
+        if (!landingWindowOpen(row, now)) {
+            return resolveDisplayStatus(
+                status = row.status,
+                scheduledDep = row.scheduledDep,
+                estimatedDep = row.estimatedDep,
+                actualDep = row.actualDep,
+                scheduledArr = row.scheduledArr,
+                estimatedArr = row.estimatedArr,
+                actualArr = row.actualArr,
+                delayMinutes = row.delayMinutes,
+                now = now,
+            )
+        }
+        return statusAfterGroundFix(row.status)
     }
 
     private suspend fun persistFix(flightId: String, fix: LiveFix) {

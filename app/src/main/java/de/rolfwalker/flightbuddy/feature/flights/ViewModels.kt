@@ -9,8 +9,10 @@ import de.rolfwalker.flightbuddy.core.data.prefs.UserPrefs
 import de.rolfwalker.flightbuddy.core.domain.LogbookStats
 import de.rolfwalker.flightbuddy.core.domain.computeLogbookStats
 import de.rolfwalker.flightbuddy.core.domain.connectionBetween
-import de.rolfwalker.flightbuddy.core.domain.isLiveStatus
+import de.rolfwalker.flightbuddy.core.domain.isAirborneDisplay
 import de.rolfwalker.flightbuddy.core.domain.isPastStatus
+import de.rolfwalker.flightbuddy.core.domain.isUpcomingDisplay
+import de.rolfwalker.flightbuddy.core.ui.status.displayFlightStatus
 import de.rolfwalker.flightbuddy.core.model.AircraftPhoto
 import de.rolfwalker.flightbuddy.core.model.ConnectionInfo
 import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
@@ -51,10 +53,11 @@ class HomeViewModel(
         HomeState(
             flights = flights,
             visible = flights.filter {
+                val shown = displayFlightStatus(it)
                 when (t) {
-                    HomeTab.LIVE -> isLiveStatus(it.status)
-                    HomeTab.PAST -> isPastStatus(it.status)
-                    HomeTab.UPCOMING -> !isLiveStatus(it.status) && !isPastStatus(it.status)
+                    HomeTab.LIVE -> isAirborneDisplay(shown)
+                    HomeTab.PAST -> isPastStatus(shown)
+                    HomeTab.UPCOMING -> isUpcomingDisplay(shown)
                 }
             }.sortedBy { it.scheduledDep },
             unread = unread,

@@ -163,6 +163,8 @@ class ProviderClients(
             terminal = dep?.optString("terminal")?.ifBlank { null },
             arrivalGate = arr?.optString("gate")?.ifBlank { null },
             arrivalTerminal = arr?.optString("terminal")?.ifBlank { null },
+            baggageBelt = listOf("baggageBelt", "baggage", "luggageBelt")
+                .firstNotNullOfOrNull { key -> arr?.optString(key)?.ifBlank { null } },
             aircraftType = aircraft?.optString("model")?.ifBlank { null },
             registration = aircraft?.optString("reg")?.ifBlank { null },
             icao24 = (aircraft?.optString("modeS") ?: aircraft?.optString("icao24"))?.ifBlank { null }?.lowercase(),

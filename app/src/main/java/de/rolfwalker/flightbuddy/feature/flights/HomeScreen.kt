@@ -46,7 +46,8 @@ import androidx.compose.ui.unit.dp
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.domain.displayFlightNumber
-import de.rolfwalker.flightbuddy.core.domain.isLiveStatus
+import de.rolfwalker.flightbuddy.core.domain.isAirborneDisplay
+import de.rolfwalker.flightbuddy.core.ui.status.displayFlightStatus
 import de.rolfwalker.flightbuddy.core.ui.SegmentItem
 import de.rolfwalker.flightbuddy.core.ui.SegmentedControl
 import de.rolfwalker.flightbuddy.core.ui.TonalCard
@@ -73,9 +74,8 @@ fun HomeScreen(
         else -> stringResource(R.string.greeting_evening)
     }
     val greet = if (firstName != null) stringResource(R.string.greeting_named, greetBase, firstName) else greetBase
-    val live = state.flights.filter { isLiveStatus(it.status) }
+    val live = state.flights.filter { isAirborneDisplay(displayFlightStatus(it)) }
     var pendingDelete by remember { mutableStateOf<FlightEntity?>(null) }
-    val language = state.prefs.language
 
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).padding(horizontal = 20.dp, vertical = 16.dp)) {
@@ -147,10 +147,7 @@ fun HomeScreen(
                             flight = flight,
                             connection = state.connections[flight.id],
                             dense = tablet,
-                            showGate = tablet,
-                            language = language,
                             onClick = { onOpen(flight.id) },
-                            onToggleDaily = { vm.setTrackDaily(flight.id, it) },
                             onDelete = { pendingDelete = flight },
                         )
                     }

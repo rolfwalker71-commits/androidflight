@@ -36,6 +36,7 @@ data class FlightEntity(
     val terminal: String?,
     val arrivalGate: String?,
     val arrivalTerminal: String?,
+    val baggageBelt: String? = null,
     val delayMinutes: Int?,
     val aircraftType: String?,
     val registration: String?,

@@ -42,15 +42,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".feature.widget.WidgetConfigActivity"
-            android:exported="true"
-            android:theme="@style/Theme.FlightBuddy">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
-            </intent-filter>
-        </activity>
-
         <service
             android:name=".tracking.FlightTrackerService"
             android:exported="false"
@@ -66,6 +57,17 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <activity
+            android:name=".feature.widget.WidgetConfigActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.FlightBuddy">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
 
         <receiver
             android:name=".feature.widget.FlightWidgetReceiver"

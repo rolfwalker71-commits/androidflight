@@ -48,6 +48,7 @@ data class FlightSearchResult(
     val terminal: String? = null,
     val arrivalGate: String? = null,
     val arrivalTerminal: String? = null,
+    val baggageBelt: String? = null,
     val aircraftType: String? = null,
     val registration: String? = null,
     val icao24: String? = null,

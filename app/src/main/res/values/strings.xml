@@ -52,7 +52,7 @@
     <string name="flight_track_daily_hint">Wir suchen jeden Tag den nächsten offiziellen Flugplan dieser Nummer.</string>
     <string name="flight_daily">täglich</string>
     <string name="flight_in_logbook">Logbuch</string>
-    <string name="flight_in_logbook_hint">Zählt in Logbuch und Statistik. Bei täglichem Tracking standardmäßig aus.</string>
+    <string name="flight_in_logbook_hint">Zählt in Logbuch und Statistik. Bei täglichem Tracking standardmässig aus.</string>
     <string name="flight_route_hint">Strecke aus lokalen Airport-Daten. Zeiten sind keine offizielle Abflugzeit.</string>
     <string name="flight_gate">Gate</string>
     <string name="flight_terminal">Terminal</string>
@@ -127,7 +127,7 @@
     <string name="alerts_empty">Noch keine Meldungen.</string>
     <string name="alerts_mark_all">Alle gelesen</string>
     <string name="alerts_event_preflight">Start in 2 Std.</string>
-    <string name="alerts_event_gate_close">Gate schließt bald</string>
+    <string name="alerts_event_gate_close">Gate schliesst bald</string>
     <string name="alerts_event_arrival">Ankunft in 30 Min.</string>
     <string name="alerts_event_gate">Gate-Änderung</string>
     <string name="alerts_event_object_air">In der Luft</string>
@@ -200,7 +200,7 @@
     <string name="push_delayed_body">Verspätet um %1$d Minuten</string>
     <string name="push_preflight_title">%1$s startet in 2 Std.</string>
     <string name="push_preflight_body">Ab %1$s</string>
-    <string name="push_gate_close_title">%1$s · Gate schließt bald</string>
+    <string name="push_gate_close_title">%1$s · Gate schliesst bald</string>
     <string name="push_gate_close_body">Noch ca. 45 Minuten bis zum Abflug</string>
     <string name="push_arrival_title">%1$s landet in 30 Min.</string>
     <string name="push_arrival_body">Baldige Ankunft</string>
@@ -214,8 +214,15 @@
     <string name="widget_description">Verfolgter Flug mit Airline-Logo und Status</string>
     <string name="widget_empty">Keine Flüge</string>
     <string name="widget_progress">%1$d %%</string>
-    <string name="widget_preflight_start">geplanter Start in %1$d Std. %2$d Minuten</string>
+    <string name="widget_preflight_start">geplanter Start in %1$d Std. %2$d Min.</string>
     <string name="widget_inflight_remaining">noch %1$d Std. %2$d Min.</string>
+    <string name="widget_arrival_in">Ankunft in %1$d Std. %2$d Min.</string>
+    <string name="widget_city_to">%1$s nach %2$s</string>
+    <string name="widget_updated_just">Gerade aktualisiert</string>
+    <string name="widget_updated_min">Vor %1$d Min. aktualisiert</string>
+    <string name="widget_updated_hr">Vor %1$d Std. aktualisiert</string>
+    <string name="widget_scheduled_under">Planmässig · %1$s</string>
+    <string name="widget_baggage">Gepäck %1$s</string>
     <string name="widget_dep_line">geplant %1$s · effektiv %2$s</string>
     <string name="widget_pick">Welchen Flug soll das Widget zeigen?</string>
     <string name="a11y_airline_logo">Logo %1$s</string>

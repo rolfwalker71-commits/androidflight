@@ -216,6 +216,13 @@
     <string name="widget_progress">%1$d %%</string>
     <string name="widget_preflight_start">scheduled departure in %1$d h %2$d min</string>
     <string name="widget_inflight_remaining">%1$d h %2$d min left</string>
+    <string name="widget_arrival_in">Arrives in %1$d h %2$d min</string>
+    <string name="widget_city_to">%1$s to %2$s</string>
+    <string name="widget_updated_just">Updated just now</string>
+    <string name="widget_updated_min">Updated %1$d min ago</string>
+    <string name="widget_updated_hr">Updated %1$d h ago</string>
+    <string name="widget_scheduled_under">Scheduled · %1$s</string>
+    <string name="widget_baggage">Bag %1$s</string>
     <string name="widget_dep_line">scheduled %1$s · effective %2$s</string>
     <string name="widget_pick">Which flight should this widget show?</string>
     <string name="a11y_airline_logo">Logo %1$s</string>

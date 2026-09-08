@@ -28,6 +28,13 @@ object DateTimeFmt {
     fun date(ms: Long, zone: ZoneId = ZoneId.systemDefault()): String =
         DATE.format(Instant.ofEpochMilli(ms).atZone(zone))
 
+    /** Short weekday + date, e.g. `Di., 8. Sept.` / `Tue, 8 Sept`. */
+    fun weekdayDate(ms: Long, zone: ZoneId = deviceZone(), language: String = "de"): String {
+        val locale = if (language.startsWith("en")) Locale.US else Locale.GERMAN
+        return DateTimeFormatter.ofPattern("EEE, d. MMM", locale)
+            .format(Instant.ofEpochMilli(ms).atZone(zone))
+    }
+
     fun time(ms: Long?, zone: ZoneId = ZoneId.systemDefault()): String {
         if (ms == null) return "—"
         return TIME.format(Instant.ofEpochMilli(ms).atZone(zone))

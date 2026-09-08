@@ -1,38 +1,45 @@
 package de.rolfwalker.flightbuddy.feature.widget
 
+import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
-import de.rolfwalker.flightbuddy.core.ui.resolveLegTimes
+import de.rolfwalker.flightbuddy.core.ui.status.FlightStatusBarKind
+import de.rolfwalker.flightbuddy.core.ui.status.FlightStatusBarState
+import de.rolfwalker.flightbuddy.core.ui.status.PREFLIGHT_BAR_WINDOW_MS as SHARED_PREFLIGHT_BAR_WINDOW_MS
+import de.rolfwalker.flightbuddy.core.ui.status.displayFlightStatus
+import de.rolfwalker.flightbuddy.core.ui.status.hasStatusDeparted
+import de.rolfwalker.flightbuddy.core.ui.status.hoursAndMinutes as sharedHoursAndMinutes
+import de.rolfwalker.flightbuddy.core.ui.status.resolveStatusBar
+import de.rolfwalker.flightbuddy.core.ui.status.statusBarForFlight
 
-/** Pre-departure fill window: empty until T−4h, full at departure. */
-internal const val PREFLIGHT_BAR_WINDOW_MS = 4L * 60 * 60 * 1000
+internal const val PREFLIGHT_BAR_WINDOW_MS = SHARED_PREFLIGHT_BAR_WINDOW_MS
 
-internal enum class WidgetBarKind { PREFLIGHT, INFLIGHT, LANDED, HIDDEN }
+internal typealias WidgetBarKind = FlightStatusBarKind
+internal typealias WidgetBarState = FlightStatusBarState
 
-internal data class WidgetBarState(
-    val kind: WidgetBarKind,
-    val percent: Int,
-    val remainingMs: Long? = null,
-)
+internal fun displayStatus(f: FlightEntity, now: Long = System.currentTimeMillis()): FlightStatus =
+    displayFlightStatus(f, now)
 
 internal fun hasWidgetDeparted(
     status: FlightStatus,
     actualDep: Long?,
     now: Long,
-): Boolean {
-    if (status == FlightStatus.DEPARTED ||
-        status == FlightStatus.EN_ROUTE ||
-        status == FlightStatus.DIVERTED
-    ) {
-        return true
-    }
-    if (status == FlightStatus.LANDED) return true
-    return actualDep != null && actualDep <= now
-}
+    scheduledDep: Long? = null,
+    estimatedDep: Long? = null,
+    scheduledArr: Long? = null,
+    estimatedArr: Long? = null,
+    actualArr: Long? = null,
+): Boolean = hasStatusDeparted(
+    status = status,
+    actualDep = actualDep,
+    now = now,
+    scheduledDep = scheduledDep,
+    estimatedDep = estimatedDep,
+    scheduledArr = scheduledArr,
+    estimatedArr = estimatedArr,
+    actualArr = actualArr,
+)
 
-internal fun hoursAndMinutes(remainingMs: Long): Pair<Int, Int> {
-    val totalMin = (remainingMs.coerceAtLeast(0L) / 60_000L).toInt()
-    return totalMin / 60 to totalMin % 60
-}
+internal fun hoursAndMinutes(remainingMs: Long): Pair<Int, Int> = sharedHoursAndMinutes(remainingMs)
 
 internal fun resolveWidgetBar(
     status: FlightStatus,
@@ -44,32 +51,19 @@ internal fun resolveWidgetBar(
     actualArr: Long?,
     flightPct: Int?,
     now: Long,
-): WidgetBarState {
-    if (status == FlightStatus.CANCELLED) {
-        return WidgetBarState(WidgetBarKind.HIDDEN, 0)
-    }
-    val arrived = status == FlightStatus.LANDED || (actualArr != null && actualArr <= now)
-    if (arrived) {
-        return WidgetBarState(WidgetBarKind.LANDED, 100)
-    }
-    if (hasWidgetDeparted(status, actualDep, now)) {
-        val eta = estimatedArr ?: actualArr ?: scheduledArr
-        return WidgetBarState(
-            kind = WidgetBarKind.INFLIGHT,
-            percent = (flightPct ?: 0).coerceIn(0, 100),
-            remainingMs = eta?.let { it - now },
-        )
-    }
-    val times = resolveLegTimes(scheduledDep, estimatedDep, actualDep)
-    val dep = times.effective ?: times.planned ?: scheduledDep
-    val remaining = dep - now
-    val percent = when {
-        remaining >= PREFLIGHT_BAR_WINDOW_MS -> 0
-        remaining <= 0L -> 100
-        else -> {
-            val filled = PREFLIGHT_BAR_WINDOW_MS - remaining
-            ((filled.toDouble() / PREFLIGHT_BAR_WINDOW_MS) * 100.0).toInt().coerceIn(0, 100)
-        }
-    }
-    return WidgetBarState(WidgetBarKind.PREFLIGHT, percent, remaining.coerceAtLeast(0L))
-}
+    delayMinutes: Int? = null,
+): WidgetBarState = resolveStatusBar(
+    status = status,
+    scheduledDep = scheduledDep,
+    estimatedDep = estimatedDep,
+    actualDep = actualDep,
+    scheduledArr = scheduledArr,
+    estimatedArr = estimatedArr,
+    actualArr = actualArr,
+    flightPct = flightPct,
+    now = now,
+    delayMinutes = delayMinutes,
+)
+
+internal fun widgetBarForFlight(f: FlightEntity, now: Long = System.currentTimeMillis()): WidgetBarState =
+    statusBarForFlight(f, now)

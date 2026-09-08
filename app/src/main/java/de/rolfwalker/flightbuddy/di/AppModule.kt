@@ -1,6 +1,8 @@
 package de.rolfwalker.flightbuddy.di
 
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import de.rolfwalker.flightbuddy.core.data.FlightRepository
 import de.rolfwalker.flightbuddy.core.data.db.AppDatabase
 import de.rolfwalker.flightbuddy.core.data.prefs.KeysStore
@@ -20,9 +22,16 @@ import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 
+private val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE flights ADD COLUMN baggageBelt TEXT")
+    }
+}
+
 val appModule = module {
     single {
         Room.databaseBuilder(androidContext(), AppDatabase::class.java, "flightbuddy.db")
+            .addMigrations(MIGRATION_1_2)
             .fallbackToDestructiveMigration()
             .build()
     }

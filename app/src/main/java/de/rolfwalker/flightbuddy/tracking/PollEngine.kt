@@ -69,11 +69,16 @@ class PollEngine(
         var next = row
         val phase = resolvePollPhase(row.toPollInput())
 
-        if (phase == PollPhase.INACTIVE || phase == PollPhase.PREFLIGHT || phase == PollPhase.AIRBORNE) {
+        val hasFr24 = keys.fr24Token.isNotBlank() && keys.fr24Enabled
+        if (phase == PollPhase.INACTIVE || phase == PollPhase.PREFLIGHT || (phase == PollPhase.AIRBORNE && !hasFr24)) {
             val date = row.scheduledDep.toLocalDate(DateTimeFmt.zoneOrDevice(row.fromTimezone))
-            val aero = providers.searchAeroNumber(keys, row.flightNumber, date, user = true)
-            if (aero.reason == SearchReason.OK) {
-                val match = pickAeroMatch(aero.flights, row)
+            val lookup = if (hasFr24) {
+                providers.searchFr24Number(keys, row.flightNumber, date)
+            } else {
+                providers.searchAeroNumber(keys, row.flightNumber, date, user = true)
+            }
+            if (lookup.reason == SearchReason.OK) {
+                val match = pickAeroMatch(lookup.flights, row)
                 if (match != null) {
                     val destChanged = match.toIata != null && row.toIata != null && match.toIata != row.toIata
                     val merged = mergeAeroFlightStatus(
@@ -137,7 +142,7 @@ class PollEngine(
                                 velocityKts = match.liveVelocityKts,
                                 heading = match.liveHeading,
                                 verticalRateFpm = match.liveVerticalRateFpm,
-                                source = "aerodatabox",
+                                source = match.source,
                                 icao24 = match.icao24,
                                 callsign = match.callsign,
                             ),
@@ -153,7 +158,7 @@ class PollEngine(
                             lastOnGround = false,
                             lastPositionAt = System.currentTimeMillis(),
                             icao24 = match.icao24 ?: next.icao24,
-                            lastStatusSource = "aerodatabox",
+                            lastStatusSource = match.source,
                         )
                     }
                 }
@@ -171,9 +176,49 @@ class PollEngine(
                 if (next.lastLat != null && next.lastLon != null) LatLon(next.lastLat!!, next.lastLon!!) else null,
                 System.currentTimeMillis(),
             ).position
+            if (hasFr24) {
+                val fr24First = providers.fetchFr24(
+                    keys,
+                    next.flightNumber,
+                    signs.filter { compactCallsign(it).let { c -> callsignPrefix(c)?.length == 3 } }
+                        .joinToString(","),
+                    next.icao24,
+                    next.lastLat ?: guess?.lat,
+                    next.lastLon ?: guess?.lon,
+                    next.registration,
+                    ignoreInterval = forceLive || hotWindow,
+                )
+                if (fr24First != null) {
+                    persistFix(next.id, fr24First)
+                    next = next.copy(
+                        status = if (fr24First.onGround) groundStatusOrKeep(next) else FlightStatus.EN_ROUTE,
+                        lastLat = fr24First.lat,
+                        lastLon = fr24First.lon,
+                        lastAltitudeFt = fr24First.altitudeFt,
+                        lastVelocityKts = fr24First.velocityKts,
+                        lastHeading = fr24First.heading,
+                        lastVerticalRateFpm = fr24First.verticalRateFpm ?: next.lastVerticalRateFpm,
+                        lastOnGround = fr24First.onGround,
+                        lastPositionAt = fr24First.observedAt,
+                        icao24 = fr24First.icao24 ?: next.icao24,
+                        callsign = fr24First.callsign ?: next.callsign,
+                        lastSquawk = normalizeSquawk(fr24First.squawk) ?: next.lastSquawk,
+                        lastStatusSource = "fr24",
+                        paintedAs = fr24First.paintedAs ?: next.paintedAs,
+                        operatingAs = fr24First.operatingAs ?: next.operatingAs,
+                        fr24Id = fr24First.fr24Id ?: next.fr24Id,
+                        fr24Eta = fr24First.eta ?: next.fr24Eta,
+                        registration = next.registration ?: fr24First.registration,
+                        aircraftType = next.aircraftType ?: fr24First.aircraftType,
+                    )
+                    gotFix = true
+                }
+            }
             val boxLat = next.lastLat ?: guess?.lat
             val boxLon = next.lastLon ?: guess?.lon
-            val states = if (!next.icao24.isNullOrBlank()) {
+            val states = if (gotFix) {
+                emptyList()
+            } else if (!next.icao24.isNullOrBlank()) {
                 providers.fetchOpenSky(keys, icao24 = next.icao24, ignoreInterval = forceLive || hotWindow)
             } else if (boxLat != null && boxLon != null) {
                 providers.fetchOpenSky(
@@ -242,7 +287,7 @@ class PollEngine(
                     next = next.copy(icao24 = null)
                 }
             }
-            if (state == null && (next.lastPositionAt == null || System.currentTimeMillis() - next.lastPositionAt!! > LIVE_FIX_STALE_MS)) {
+            if (!hasFr24 && state == null && (next.lastPositionAt == null || System.currentTimeMillis() - next.lastPositionAt!! > LIVE_FIX_STALE_MS)) {
                 val live = providers.lookupAeroLive(
                     keys,
                     next.flightNumber,
@@ -287,7 +332,7 @@ class PollEngine(
             }
             val stale = next.lastPositionAt == null || System.currentTimeMillis() - next.lastPositionAt!! > LIVE_FIX_STALE_MS
             val flyingNow = isAirborneTelemetry(next.lastAltitudeFt, next.lastVelocityKts, next.lastOnGround)
-            if ((!gotFix && stale) || !flyingNow) {
+            if (!hasFr24 && ((!gotFix && stale) || !flyingNow)) {
                 val fr24 = providers.fetchFr24(
                     keys,
                     next.flightNumber,

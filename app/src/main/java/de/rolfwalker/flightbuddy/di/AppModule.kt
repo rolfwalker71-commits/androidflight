@@ -9,6 +9,7 @@ import de.rolfwalker.flightbuddy.core.data.db.AppDatabase
 import de.rolfwalker.flightbuddy.core.data.prefs.KeysStore
 import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
+import de.rolfwalker.flightbuddy.feature.airport.AirportBoardViewModel
 import de.rolfwalker.flightbuddy.feature.alerts.AlertsViewModel
 import de.rolfwalker.flightbuddy.feature.flights.AddFlightViewModel
 import de.rolfwalker.flightbuddy.feature.flights.FlightDetailViewModel
@@ -101,7 +102,8 @@ val appModule = module {
     single { WidgetUpdater(androidContext(), get()) }
     viewModel { HomeViewModel(get(), get()) }
     viewModel { AddFlightViewModel(get()) }
-    viewModel { params -> FlightDetailViewModel(params.get(), get(), get(), get(), get()) }
+    viewModel { params -> FlightDetailViewModel(params.get(), get(), get(), get(), get(), get()) }
+    viewModel { params -> AirportBoardViewModel(params.get<String>(), params.get<Boolean>(), get(), get()) }
     viewModel { MapViewModel(get(), get(), get()) }
     viewModel { LogbookViewModel(get()) }
     viewModel { AlertsViewModel(get()) }

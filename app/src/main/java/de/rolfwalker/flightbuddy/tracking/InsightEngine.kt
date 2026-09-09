@@ -4,11 +4,16 @@ import de.rolfwalker.flightbuddy.core.data.FlightRepository
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.data.prefs.ApiKeys
 import de.rolfwalker.flightbuddy.core.data.toLocalDate
+import de.rolfwalker.flightbuddy.core.domain.FlightProfile
+import de.rolfwalker.flightbuddy.core.domain.HistoricLeg
+import de.rolfwalker.flightbuddy.core.domain.buildFlightProfile
 import de.rolfwalker.flightbuddy.core.domain.buildTimeline
 import de.rolfwalker.flightbuddy.core.domain.encodeTimeline
+import de.rolfwalker.flightbuddy.core.domain.historicLegFromSummary
 import de.rolfwalker.flightbuddy.core.domain.medianInt
 import de.rolfwalker.flightbuddy.core.domain.taxiMinutes
 import de.rolfwalker.flightbuddy.core.model.FlightStatus
+import de.rolfwalker.flightbuddy.core.model.LatLon
 import de.rolfwalker.flightbuddy.core.network.Fr24Summary
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
 import java.time.Instant
@@ -30,6 +35,56 @@ class InsightEngine(
         next = mergeFr24Ops(next, keys)
         next = mergePunctuality(next, keys)
         return next.copy(insightUpdatedAt = now)
+    }
+
+    suspend fun flightProfile(row: FlightEntity, keys: ApiKeys): FlightProfile? {
+        val from = iso(row.scheduledDep - 21L * 24 * 60 * 60 * 1000)
+        val to = iso(row.scheduledDep + 6L * 60 * 60 * 1000)
+        val hist = providers.fetchFr24Summaries(keys, flights = row.flightNumber, fromIso = from, toIso = to, limit = 40)
+        return buildFlightProfile(hist, emptyList())
+    }
+
+    suspend fun aircraftLegs(row: FlightEntity, keys: ApiKeys): List<HistoricLeg> {
+        val reg = row.registration
+        val from = iso(row.scheduledDep - 7L * 24 * 60 * 60 * 1000)
+        val to = iso(row.scheduledDep + 12L * 60 * 60 * 1000)
+        val fr24 = if (!reg.isNullOrBlank()) {
+            providers.fetchFr24Summaries(keys, registrations = reg, fromIso = from, toIso = to, limit = 16)
+                .map { historicLegFromSummary(it) }
+        } else {
+            emptyList()
+        }
+        if (fr24.isNotEmpty()) return fr24.sortedByDescending { it.at ?: 0L }.take(10)
+        val hex = row.icao24 ?: return emptyList()
+        return providers.fetchOpenSkyAircraftFlights(
+            keys,
+            hex,
+            row.scheduledDep - 7L * 24 * 60 * 60 * 1000,
+            row.scheduledDep + 12L * 60 * 60 * 1000,
+        ).map { o ->
+            HistoricLeg(
+                flightNumber = o.callsign,
+                fromIata = o.fromIcao,
+                toIata = o.toIcao,
+                at = o.firstSeen,
+                landedAt = o.lastSeen,
+                delayMin = null,
+                registration = reg,
+                callsign = o.callsign,
+                taxiOutMin = null,
+                blockMin = o.firstSeen?.let { a ->
+                    o.lastSeen?.let { b -> if (b > a) ((b - a) / 60_000L).toInt().takeIf { it in 1..1200 } else null }
+                },
+            )
+        }.sortedByDescending { it.at ?: 0L }.take(10)
+    }
+
+    suspend fun historicTrack(row: FlightEntity, keys: ApiKeys): List<LatLon> {
+        val around = row.runwayDepAt ?: row.actualDep ?: row.scheduledDep
+        val fr24 = providers.fetchFr24HistoricTrack(keys, row.fr24Id, row.flightNumber, around)
+        if (fr24.size >= 2) return fr24
+        val hex = row.icao24 ?: return emptyList()
+        return providers.fetchOpenSkyTrack(keys, hex)
     }
 
     private fun needsOps(row: FlightEntity): Boolean {
@@ -58,7 +113,7 @@ class InsightEngine(
             }
             return row
         }
-        val info = providers.fetchAeroAirport(keys, iata) ?: providers.fetchFr24Airport(keys, iata)
+        val info = providers.fetchFr24Airport(keys, iata) ?: providers.fetchAeroAirport(keys, iata)
         if (info != null) {
             repo.upsertAirport(
                 iata = info.iata ?: iata,
@@ -93,12 +148,15 @@ class InsightEngine(
     }
 
     private suspend fun mergeWeatherAndDelay(row: FlightEntity, keys: ApiKeys): FlightEntity {
+        val needWx = row.depMetar == null || row.arrMetar == null
+        val needDelay = row.depAirportDelayMin == null || row.arrAirportDelayMin == null
+        if (!needWx && !needDelay) return row
         val depDay = row.scheduledDep.toLocalDate(de.rolfwalker.flightbuddy.core.DateTimeFmt.zoneOrDevice(row.fromTimezone))
         val arrDay = (row.scheduledArr ?: row.scheduledDep).toLocalDate(de.rolfwalker.flightbuddy.core.DateTimeFmt.zoneOrDevice(row.toTimezone))
-        val depWx = row.fromIata?.let { providers.fetchAeroWeather(keys, it, depDay) }
-        val arrWx = row.toIata?.let { providers.fetchAeroWeather(keys, it, arrDay) }
-        val depDelay = row.fromIata?.let { providers.fetchAeroDelayIndex(keys, it, depDay) }
-        val arrDelay = row.toIata?.let { providers.fetchAeroDelayIndex(keys, it, arrDay) }
+        val depWx = if (needWx) row.fromIata?.let { providers.fetchAeroWeather(keys, it, depDay) } else null
+        val arrWx = if (needWx) row.toIata?.let { providers.fetchAeroWeather(keys, it, arrDay) } else null
+        val depDelay = if (needDelay) row.fromIata?.let { providers.fetchAeroDelayIndex(keys, it, depDay) } else null
+        val arrDelay = if (needDelay) row.toIata?.let { providers.fetchAeroDelayIndex(keys, it, arrDay) } else null
         return row.copy(
             depMetar = depWx?.metar ?: row.depMetar,
             arrMetar = arrWx?.metar ?: row.arrMetar,
@@ -108,6 +166,7 @@ class InsightEngine(
     }
 
     private suspend fun mergeAircraft(row: FlightEntity, keys: ApiKeys): FlightEntity {
+        if (keys.fr24Token.isNotBlank() && keys.fr24Enabled) return row
         val reg = row.registration ?: return row
         if (row.aircraftAgeYears != null && row.aircraftOperator != null) return row
         val info = providers.fetchAeroAircraft(keys, reg) ?: return row
@@ -176,12 +235,6 @@ class InsightEngine(
             System.currentTimeMillis() - row.insightUpdatedAt!! < 12L * 60 * 60 * 1000
         ) {
             return row
-        }
-        val day = row.scheduledDep.toLocalDate(ZoneOffset.UTC)
-        val aero = providers.searchAeroRange(keys, row.flightNumber, day.minusDays(14), day)
-        val delays = aero.flights.mapNotNull { it.delayMinutes }.filter { it >= 0 }
-        if (delays.size >= 3) {
-            return row.copy(punctualityMedianMin = medianInt(delays), punctualitySample = delays.size)
         }
         val from = iso(row.scheduledDep - 14L * 24 * 60 * 60 * 1000)
         val to = iso(row.scheduledDep + 6L * 60 * 60 * 1000)

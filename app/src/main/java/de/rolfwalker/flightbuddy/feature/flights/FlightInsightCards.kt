@@ -1,6 +1,7 @@
 package de.rolfwalker.flightbuddy.feature.flights
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,20 +16,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.DateTimeFmt
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
+import de.rolfwalker.flightbuddy.core.domain.FlightProfile
+import de.rolfwalker.flightbuddy.core.domain.HistoricLeg
 import de.rolfwalker.flightbuddy.core.domain.arrZone
 import de.rolfwalker.flightbuddy.core.domain.depZone
+import de.rolfwalker.flightbuddy.core.domain.displayFlightNumber
 import de.rolfwalker.flightbuddy.core.domain.parseTimeline
 import de.rolfwalker.flightbuddy.core.domain.wetLeaseLine
 import de.rolfwalker.flightbuddy.core.model.Units
 import de.rolfwalker.flightbuddy.core.ui.TonalCard
 
 @Composable
-fun FlightOpsCards(row: FlightEntity, units: Units, language: String) {
+fun FlightOpsCards(row: FlightEntity, units: Units, language: String, hidePunctuality: Boolean = false) {
     val reasons = delayReasons(row)
     if (reasons.isNotEmpty()) {
         InsightCard(stringResource(R.string.insight_delay_title)) {
@@ -65,7 +73,7 @@ fun FlightOpsCards(row: FlightEntity, units: Units, language: String) {
             Text(stringResource(R.string.insight_codeshares, shares), style = MaterialTheme.typography.bodyMedium)
         }
     }
-    if (row.punctualitySample != null && row.punctualityMedianMin != null) {
+    if (!hidePunctuality && row.punctualitySample != null && row.punctualityMedianMin != null) {
         InsightCard(stringResource(R.string.insight_punctuality_title)) {
             Text(
                 stringResource(R.string.insight_punctuality_body, row.punctualitySample!!, row.punctualityMedianMin!!),
@@ -92,6 +100,106 @@ fun FlightOpsCards(row: FlightEntity, units: Units, language: String) {
             planeBits.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
         }
     }
+}
+
+@Composable
+fun FlightProfileCard(profile: FlightProfile, onAirport: (String, Boolean) -> Unit) {
+    InsightCard(stringResource(R.string.profile_title)) {
+        Text(
+            stringResource(R.string.profile_sample, profile.sample),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        val stats = listOfNotNull(
+            profile.onTimePct?.let { stringResource(R.string.profile_ontime, it) },
+            profile.medianDelayMin?.let { stringResource(R.string.profile_delay, it) },
+            profile.medianTaxiOutMin?.let { stringResource(R.string.profile_taxi, it) },
+            profile.medianBlockMin?.let { stringResource(R.string.profile_block, it) },
+        )
+        stats.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        if (profile.tails.isNotEmpty()) {
+            Text(
+                stringResource(
+                    R.string.profile_tails,
+                    profile.tails.joinToString(", ") { (reg, n) -> "$reg · ${n}×" },
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (profile.legs.isNotEmpty()) {
+            Text(
+                stringResource(R.string.profile_legs),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            profile.legs.forEach { HistoricLegRow(it, onAirport) }
+        }
+    }
+}
+
+@Composable
+fun AircraftHistoryCard(
+    registration: String?,
+    legs: List<HistoricLeg>,
+    onAirport: (String, Boolean) -> Unit,
+) {
+    if (legs.isEmpty()) return
+    InsightCard(
+        if (registration.isNullOrBlank()) stringResource(R.string.aircraft_history_title)
+        else stringResource(R.string.aircraft_history_reg, registration),
+    ) {
+        legs.forEach { HistoricLegRow(it, onAirport) }
+    }
+}
+
+@Composable
+private fun HistoricLegRow(leg: HistoricLeg, onAirport: (String, Boolean) -> Unit) {
+    val number = leg.flightNumber?.let { displayFlightNumber(it) } ?: "—"
+    val whenText = leg.at?.let { DateTimeFmt.date(it) } ?: "—"
+    val extras = listOfNotNull(
+        leg.delayMin?.let { stringResource(R.string.profile_leg_delay, it) },
+        leg.taxiOutMin?.let { stringResource(R.string.insight_taxi_out, it) },
+        leg.registration?.takeIf { it.isNotBlank() },
+        leg.callsign?.takeIf { !it.equals(leg.flightNumber, true) },
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Column(Modifier.weight(1f)) {
+            Text("$whenText · $number", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                AirportLink(leg.fromIata, arrivals = false, onAirport)
+                Text("–", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                AirportLink(leg.toIata, arrivals = true, onAirport)
+            }
+            if (extras.isNotEmpty()) {
+                Text(
+                    extras.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AirportLink(code: String?, arrivals: Boolean, onAirport: (String, Boolean) -> Unit) {
+    val iata = code?.trim()?.uppercase().orEmpty()
+    if (iata.length !in 3..4) {
+        Text(iata.ifBlank { "—" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    val label = stringResource(R.string.airport_open, iata)
+    Text(
+        iata,
+        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .clickable { onAirport(iata, arrivals) }
+            .semantics {
+                role = Role.Button
+                contentDescription = label
+            },
+    )
 }
 
 @Composable

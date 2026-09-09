@@ -2,6 +2,9 @@ package de.rolfwalker.flightbuddy.feature.map
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.clickable
@@ -17,11 +20,11 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import android.location.LocationManager
+import androidx.core.app.ActivityCompat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.NearMe
@@ -139,12 +142,19 @@ private class FlightMapState {
                 state.motionPosted = false
                 return
             }
-            state.map?.let { paintMotion(it, view) }
-            view.postDelayed(this, TRAFFIC_FRAME_MS)
+            if (state.alive && !state.released) {
+                state.map?.let { paintMotion(it, view) }
+            }
+            if (state.alive && !state.released) {
+                view.postDelayed(this, TRAFFIC_FRAME_MS)
+            } else {
+                state.motionPosted = false
+            }
         }
     }
     var host: MapView? = null
     var locateId: Long = 0L
+    var released: Boolean = false
 }
 
 data class MapLocateRequest(val lat: Double, val lon: Double, val id: Long = System.currentTimeMillis())
@@ -189,6 +199,7 @@ fun FlightMapView(
                     onStart()
                     onResume()
                     getMapAsync { map ->
+                        if (!mapState().alive || mapState().released) return@getMapAsync
                         map.uiSettings.isAttributionEnabled = true
                         map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(50.0, 10.0), 3.5))
                         applyBasemap(map, this, style, flights, tracks)
@@ -197,6 +208,7 @@ fun FlightMapView(
             },
             update = { view ->
                 val state = view.mapState()
+                if (state.released) return@AndroidView
                 state.alive = true
                 state.host = view
                 state.onViewport = onViewport
@@ -207,28 +219,32 @@ fun FlightMapView(
                 state.mapStyle = style
                 state.onFlags = { next -> syncFlagSlots(flags, next) }
                 view.getMapAsync { map ->
+                    if (!state.alive || state.released) return@getMapAsync
                     state.map = map
                     applyBasemap(map, view, style, flights, tracks)
                     if (locate != null && state.locateId != locate.id) {
                         state.locateId = locate.id
-                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(locate.lat, locate.lon), 10.0))
+                        runCatching {
+                            map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(locate.lat, locate.lon), 10.0))
+                        }
                     }
                     if (state.cameraKey != cameraKey) {
                         state.cameraKey = cameraKey
-                        updateCamera(map, state, flights, tracks, followId, frameFlightId)
+                        updateCamera(map, view, state, flights, tracks, followId, frameFlightId)
                     }
                     if (!state.idleBound) {
                         state.idleBound = true
-                        val emit = {
-                            val b = map.projection.visibleRegion.latLngBounds
-                            state.onViewport?.invoke(b.latitudeSouth, b.latitudeNorth, b.longitudeWest, b.longitudeEast)
-                        }
+                        val emit = { emitViewport(map, view, state) }
                         map.addOnCameraIdleListener { emit() }
-                        emit()
+                        view.post { emit() }
                     }
                     if (!state.moveBound) {
                         state.moveBound = true
-                        map.addOnCameraMoveListener { state.onFlags?.invoke(projectTrafficFlags(map, view)) }
+                        map.addOnCameraMoveListener {
+                            if (state.alive && !state.released) {
+                                state.onFlags?.invoke(projectTrafficFlags(map, view))
+                            }
+                        }
                     }
                     startMotion(view)
                 }
@@ -236,11 +252,15 @@ fun FlightMapView(
             onRelease = { view ->
                 val state = view.mapState()
                 state.alive = false
+                state.released = true
                 state.motionPosted = false
+                state.map = null
                 view.removeCallbacks(state.motionTick)
-                view.onPause()
-                view.onStop()
-                view.onDestroy()
+                runCatching {
+                    view.onPause()
+                    view.onStop()
+                    view.onDestroy()
+                }
             },
         )
         Box(Modifier.fillMaxSize().pointerInteropFilter { false }) {
@@ -313,6 +333,24 @@ private fun TrafficCallsignFlag(aircraft: TrafficState, modifier: Modifier = Mod
 private fun MapView.mapState(): FlightMapState =
     (tag as? FlightMapState) ?: FlightMapState().also { tag = it }
 
+private fun readyStyle(map: MapLibreMap): org.maplibre.android.maps.Style? =
+    runCatching { map.style?.takeIf { it.isFullyLoaded } }.getOrNull()
+
+private fun emitViewport(map: MapLibreMap, view: MapView, state: FlightMapState) {
+    if (!state.alive || state.released || view.width < 16 || view.height < 16) return
+    runCatching {
+        val bounds = map.projection.visibleRegion.latLngBounds
+        if (!bounds.latitudeSouth.isFinite() || !bounds.latitudeNorth.isFinite()) return
+        if (bounds.latitudeSouth >= bounds.latitudeNorth) return
+        state.onViewport?.invoke(
+            bounds.latitudeSouth,
+            bounds.latitudeNorth,
+            bounds.longitudeWest,
+            bounds.longitudeEast,
+        )
+    }
+}
+
 private fun applyBasemap(
     map: MapLibreMap,
     view: MapView,
@@ -325,13 +363,12 @@ private fun applyBasemap(
         state.styleId = styleId
         state.framedId = null
         map.setStyle(mapLibreStyleBuilder(styleId)) { loaded ->
-            if (state.styleId == styleId) {
-                drawOverlay(loaded, flights, tracks, styleId)
-                paintTraffic(map, view, styleId)
-            }
+            if (!state.alive || state.released || state.styleId != styleId || !loaded.isFullyLoaded) return@setStyle
+            runCatching { drawOverlay(loaded, flights, tracks, styleId) }
+            paintTraffic(map, view, styleId)
         }
     } else {
-        map.style?.let { drawOverlay(it, flights, tracks, styleId) }
+        readyStyle(map)?.let { runCatching { drawOverlay(it, flights, tracks, styleId) } }
     }
 }
 
@@ -344,18 +381,25 @@ private fun drawOverlay(
     val color = arcColor(mapStyle)
     val now = System.currentTimeMillis()
     val arcFeatures = flights.mapNotNull { f ->
-        val dest = if (f.toLat != null && f.toLon != null) LatLon(f.toLat, f.toLon) else return@mapNotNull null
+        val dest = f.toLat?.let { lat -> f.toLon?.let { lon -> LatLon(lat, lon) } }?.takeIf { it.isValidMapPoint() }
+            ?: return@mapNotNull null
         val recorded = tracks[f.id].orEmpty()
-        val from = currentPlane(f, now)
+        val from = (currentPlane(f, now)
             ?: recorded.lastOrNull()
-            ?: if (f.fromLat != null && f.fromLon != null) LatLon(f.fromLat, f.fromLon) else return@mapNotNull null
-        val pts = interpolateGreatCircle(from, dest).map { Point.fromLngLat(it.lon, it.lat) }
+            ?: f.fromLat?.let { lat -> f.fromLon?.let { lon -> LatLon(lat, lon) } })
+            ?.takeIf { it.isValidMapPoint() }
+            ?: return@mapNotNull null
+        val pts = interpolateGreatCircle(from, dest).mapNotNull {
+            if (it.isValidMapPoint()) Point.fromLngLat(it.lon, it.lat) else null
+        }
+        if (pts.size < 2) return@mapNotNull null
         Feature.fromGeometry(LineString.fromLngLats(pts))
     }
     val trackFeatures = flights.mapNotNull { f ->
         val pts = flownTrack(f, tracks[f.id].orEmpty(), now)
-        if (pts.size < 2) return@mapNotNull null
-        Feature.fromGeometry(LineString.fromLngLats(pts.map { Point.fromLngLat(it.lon, it.lat) }))
+        val line = pts.mapNotNull { if (it.isValidMapPoint()) Point.fromLngLat(it.lon, it.lat) else null }
+        if (line.size < 2) return@mapNotNull null
+        Feature.fromGeometry(LineString.fromLngLats(line))
     }
     val planeFeatures = flights.mapNotNull { f ->
         val pos = currentPlane(f, now) ?: return@mapNotNull null
@@ -366,8 +410,10 @@ private fun drawOverlay(
     val remainingOpacity = if (trackFeatures.isEmpty()) 0.9f else 0.4f
     upsertLine(style, "arcs", arcFeatures, color, 2.2f, remainingOpacity)
     upsertLine(style, "tracks", trackFeatures, color, 3.2f, 1f)
-    if (style.getImage("plane") == null) {
-        style.addImage("plane", northPlaneBitmap(color))
+    runCatching {
+        if (style.getImage("plane") == null) {
+            style.addImage("plane", northPlaneBitmap(color))
+        }
     }
     upsertPlanes(style, planeFeatures)
 }
@@ -390,12 +436,15 @@ private fun startMotion(view: MapView) {
 }
 
 private fun paintMotion(map: MapLibreMap, view: MapView) {
-    val style = map.style ?: return
     val state = view.mapState()
+    if (!state.alive || state.released) return
+    val style = readyStyle(map) ?: return
     val mapStyle = state.mapStyle ?: return
     val color = arcColor(mapStyle)
-    if (style.getImage("plane") == null) {
-        style.addImage("plane", northPlaneBitmap(color))
+    runCatching {
+        if (style.getImage("plane") == null) {
+            style.addImage("plane", northPlaneBitmap(color))
+        }
     }
     val now = System.currentTimeMillis()
     val dtS = if (state.lastMotionAt == 0L) {
@@ -421,6 +470,7 @@ private fun paintMotion(map: MapLibreMap, view: MapView) {
             shown.heading = lerpHeading(shown.heading, heading, alpha)
             LatLon(shown.lat, shown.lon)
         }
+        if (!pos.lat.isFinite() || !pos.lon.isFinite()) return@mapNotNull null
         Feature.fromGeometry(Point.fromLngLat(pos.lon, pos.lat)).also { feat ->
             feat.addNumberProperty("heading", state.shown[ac.icao24]?.heading ?: heading)
             feat.addStringProperty("icao24", ac.icao24)
@@ -481,7 +531,7 @@ private fun projectTrafficFlags(
     view: MapView,
 ): List<TrafficFlagPos> {
     val state = view.mapState()
-    if (state.traffic.isEmpty() || map.cameraPosition.zoom < TRAFFIC_FLAG_MIN_ZOOM) return emptyList()
+    if (state.released || state.traffic.isEmpty() || map.cameraPosition.zoom < TRAFFIC_FLAG_MIN_ZOOM) return emptyList()
     val w = view.width.toFloat()
     val h = view.height.toFloat()
     if (w < 8f || h < 8f) return emptyList()
@@ -510,9 +560,9 @@ private fun upsertTrafficPlanes(
     color: String,
 ) {
     val collection = FeatureCollection.fromFeatures(features)
-    val src = style.getSourceAs<GeoJsonSource>(TRAFFIC_SOURCE)
-    if (src == null) style.addSource(GeoJsonSource(TRAFFIC_SOURCE, collection))
-    else src.setGeoJson(collection)
+    val src = runCatching { style.getSourceAs<GeoJsonSource>(TRAFFIC_SOURCE) }.getOrNull()
+    if (src == null) runCatching { style.addSource(GeoJsonSource(TRAFFIC_SOURCE, collection)) }
+    else runCatching { src.setGeoJson(collection) }
     if (style.getLayer(TRAFFIC_DOTS) == null) {
         addTrafficLayer(
             style,
@@ -558,44 +608,51 @@ private fun upsertLine(
     opacity: Float,
 ) {
     val collection = FeatureCollection.fromFeatures(features)
-    val src = style.getSourceAs<GeoJsonSource>(id)
+    val src = runCatching { style.getSourceAs<GeoJsonSource>(id) }.getOrNull()
     if (src == null) {
-        style.addSource(GeoJsonSource(id, collection))
-        style.addLayer(
-            LineLayer(id, id).withProperties(
-                PropertyFactory.lineColor(color),
-                PropertyFactory.lineWidth(width),
-                PropertyFactory.lineOpacity(opacity),
-            ),
-        )
+        runCatching {
+            style.addSource(GeoJsonSource(id, collection))
+            style.addLayer(
+                LineLayer(id, id).withProperties(
+                    PropertyFactory.lineColor(color),
+                    PropertyFactory.lineWidth(width),
+                    PropertyFactory.lineOpacity(opacity),
+                ),
+            )
+        }
     } else {
-        src.setGeoJson(collection)
+        runCatching { src.setGeoJson(collection) }
     }
 }
 
 private fun upsertPlanes(style: org.maplibre.android.maps.Style, features: List<Feature>) {
     val collection = FeatureCollection.fromFeatures(features)
-    val src = style.getSourceAs<GeoJsonSource>("planes")
+    val src = runCatching { style.getSourceAs<GeoJsonSource>("planes") }.getOrNull()
     if (src == null) {
-        style.addSource(GeoJsonSource("planes", collection))
-        style.addLayer(
-            SymbolLayer("planes", "planes").withProperties(
-                PropertyFactory.iconImage("plane"),
-                PropertyFactory.iconSize(1f),
-                PropertyFactory.iconRotate(Expression.get("heading")),
-                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
-                PropertyFactory.iconAllowOverlap(true),
-                PropertyFactory.iconIgnorePlacement(true),
-            ),
-        )
+        runCatching {
+            style.addSource(GeoJsonSource("planes", collection))
+            style.addLayer(
+                SymbolLayer("planes", "planes").withProperties(
+                    PropertyFactory.iconImage("plane"),
+                    PropertyFactory.iconSize(1f),
+                    PropertyFactory.iconRotate(Expression.get("heading")),
+                    PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                    PropertyFactory.iconAllowOverlap(true),
+                    PropertyFactory.iconIgnorePlacement(true),
+                ),
+            )
+        }
     } else {
-        src.setGeoJson(collection)
+        runCatching { src.setGeoJson(collection) }
     }
 }
 
+private fun LatLon.isValidMapPoint(): Boolean =
+    lat.isFinite() && lon.isFinite() && lat in -90.0..90.0 && lon in -180.0..180.0
+
 private fun currentPlane(f: FlightEntity, now: Long): LatLon? {
     val last = if (f.lastLat != null && f.lastLon != null) LatLon(f.lastLat, f.lastLon) else null
-    return interpolateAirbornePosition(f.toPollInput(), last, now).position
+    return interpolateAirbornePosition(f.toPollInput(), last, now).position?.takeIf { it.isValidMapPoint() }
 }
 
 private fun flownTrack(f: FlightEntity, recorded: List<LatLon>, now: Long): List<LatLon> {
@@ -624,17 +681,19 @@ private fun planeHeading(f: FlightEntity, pos: LatLon, recorded: List<LatLon>): 
 
 private fun updateCamera(
     map: MapLibreMap,
+    view: MapView,
     state: FlightMapState,
     flights: List<FlightEntity>,
     tracks: Map<String, List<LatLon>>,
     followId: String?,
     frameFlightId: String?,
 ) {
+    if (view.width < 64 || view.height < 64) return
     val now = System.currentTimeMillis()
     if (followId != null) {
         val follow = flights.find { it.id == followId } ?: return
         val pos = currentPlane(follow, now) ?: return
-        map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(pos.lat, pos.lon), 6.0))
+        runCatching { map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(pos.lat, pos.lon), 6.0)) }
         return
     }
     val frameId = frameFlightId ?: return
@@ -647,11 +706,14 @@ private fun updateCamera(
     currentPlane(flight, now)?.let { pts += LatLng(it.lat, it.lon) }
     if (pts.isEmpty()) return
     state.framedId = frameId
-    if (pts.size == 1) {
-        map.animateCamera(CameraUpdateFactory.newLatLngZoom(pts.first(), 6.0))
-    } else {
-        val bounds = LatLngBounds.Builder().apply { pts.forEach { include(it) } }.build()
-        map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 56))
+    runCatching {
+        if (pts.size == 1) {
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(pts.first(), 6.0))
+        } else {
+            val bounds = LatLngBounds.Builder().apply { pts.forEach { include(it) } }.build()
+            val pad = minOf(56, view.width / 6, view.height / 6).coerceAtLeast(8)
+            map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, pad))
+        }
     }
 }
 
@@ -659,7 +721,7 @@ private fun updateCamera(
 fun HomeHeroMap(flights: List<FlightEntity>, mapStyle: MapStyleId, onOpen: (String) -> Unit) {
     TonalCard(Modifier.fillMaxSize()) {
         Column {
-            FlightMapView(flights, flights.firstOrNull()?.id, emptyList(), mapStyle, Modifier.weight(1f))
+            FlightMapView(emptyList(), null, emptyList(), mapStyle, Modifier.weight(1f))
             LazyColumn(Modifier.height(160.dp).padding(8.dp)) {
                 items(flights) { f ->
                     Text(displayFlightNumber(f.flightNumber), modifier = Modifier.clickable { onOpen(f.id) }.padding(8.dp))
@@ -674,23 +736,31 @@ fun HomeHeroMap(flights: List<FlightEntity>, mapStyle: MapStyleId, onOpen: (Stri
 fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
     val state by vm.state.collectAsState()
     val selected = state.flights.find { it.id == state.selectedId }
+    val overlayFlights = selected?.let { listOf(it) }.orEmpty()
+    val overlayTracks = selected?.id?.let { id -> state.tracks.filterKeys { it == id } }.orEmpty()
     val context = LocalContext.current
     var locate by remember { mutableStateOf<MapLocateRequest?>(null) }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-        if (granted.values.any { it }) locate = lastKnownFix(context)
-    }
-    val goToMe = {
-        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (fine || coarse) locate = lastKnownFix(context)
-        else permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    val goToMe: () -> Unit = {
+        if (hasLocationPermission(context)) {
+            locate = lastKnownFix(context)
+        } else {
+            context.findActivity()?.let { activity ->
+                ActivityCompat.requestPermissions(
+                    activity,
+                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                    LOCATION_PERMISSION_REQ,
+                )
+            }
+        }
+        Unit
     }
     Row(Modifier.fillMaxSize()) {
         if (tablet) {
             LazyColumn(Modifier.fillMaxHeight().weight(0.38f).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { Text(stringResource(R.string.map_tracked), style = MaterialTheme.typography.titleMedium) }
-                items(state.flights) { f ->
-                    TonalCard(Modifier.fillMaxWidth().clickable { vm.select(f.id); onOpen(f.id) }) {
+                items(state.flights, key = { it.id }) { f ->
+                    val picked = state.selectedId == f.id
+                    TonalCard(Modifier.fillMaxWidth().clickable { vm.select(if (picked) null else f.id) }) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             AirlineLogo(f.airlineIata, f.airlineName, 29)
                             Column(Modifier.padding(start = 8.dp).weight(1f)) {
@@ -713,13 +783,14 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
         }
         Box(Modifier.weight(1f)) {
             FlightMapView(
-                flights = state.flights,
+                flights = overlayFlights,
                 followId = if (state.follow) state.selectedId else null,
                 traffic = if (state.trafficOn) state.traffic else emptyList(),
                 style = state.prefs.mapStyle,
                 modifier = Modifier.fillMaxSize(),
                 onViewport = { a, b, c, d -> vm.loadTraffic(a, b, c, d) },
-                tracks = state.tracks,
+                tracks = overlayTracks,
+                frameFlightId = selected?.id,
                 locate = locate,
             )
             Row(Modifier.align(Alignment.TopEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -744,22 +815,41 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
                     },
                 )
             }
-            if (!tablet && selected != null) {
-                TonalCard(Modifier.align(Alignment.BottomCenter).padding(12.dp).fillMaxWidth().clickable { onOpen(selected.id) }) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        AirlineLogo(selected.airlineIata, selected.airlineName)
-                        Column(Modifier.padding(start = 12.dp)) {
-                            Text(displayFlightNumber(selected.flightNumber), style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "${selected.fromIata}–${selected.toIata} · ${DateTimeFmt.dateTime(selected.scheduledDep, DateTimeFmt.deviceZone())}",
+            if (!tablet && state.flights.isNotEmpty()) {
+                Column(
+                    Modifier.align(Alignment.BottomCenter).padding(12.dp).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(state.flights, key = { it.id }) { f ->
+                            val picked = state.selectedId == f.id
+                            FilterChip(
+                                selected = picked,
+                                onClick = { vm.select(if (picked) null else f.id) },
+                                label = { Text(displayFlightNumber(f.flightNumber)) },
                             )
+                        }
+                    }
+                    if (selected != null) {
+                        TonalCard(Modifier.fillMaxWidth().clickable { onOpen(selected.id) }) {
+                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AirlineLogo(selected.airlineIata, selected.airlineName)
+                                Column(Modifier.padding(start = 12.dp)) {
+                                    Text(displayFlightNumber(selected.flightNumber), style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        "${selected.fromIata}–${selected.toIata} · ${DateTimeFmt.dateTime(selected.scheduledDep, DateTimeFmt.deviceZone())}",
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         if (tablet && selected != null) {
-            Column(Modifier.weight(0.4f).padding(12.dp)) {
+            Column(
+                Modifier.weight(0.4f).padding(12.dp).clickable { onOpen(selected.id) },
+            ) {
                 Text(displayFlightNumber(selected.flightNumber), style = MaterialTheme.typography.headlineSmall)
                 StatusBadge(displayFlightStatus(selected), selected.delayMinutes)
                 Text("${selected.fromCity} → ${selected.toCity}")
@@ -769,8 +859,27 @@ fun MapScreen(tablet: Boolean, vm: MapViewModel, onOpen: (String) -> Unit) {
     }
 }
 
+private const val LOCATION_PERMISSION_REQ = 71
+
+private fun hasLocationPermission(context: Context): Boolean {
+    val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+    val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+    return fine || coarse
+}
+
+private fun Context.findActivity(): Activity? {
+    var ctx: Context = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
 @SuppressLint("MissingPermission")
-private fun lastKnownFix(context: android.content.Context): MapLocateRequest? {
+private fun lastKnownFix(context: Context): MapLocateRequest? {
     val lm = context.getSystemService(LocationManager::class.java) ?: return null
     val loc = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
         .firstNotNullOfOrNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }

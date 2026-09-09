@@ -1,6 +1,7 @@
 package de.rolfwalker.flightbuddy.feature.flights
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -74,12 +79,19 @@ import de.rolfwalker.flightbuddy.core.ui.flightTelemetryKpis
 import de.rolfwalker.flightbuddy.feature.map.FlightMapView
 
 @Composable
-fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () -> Unit) {
+fun FlightDetailScreen(
+    tablet: Boolean,
+    vm: FlightDetailViewModel,
+    onBack: () -> Unit,
+    onAirport: (String, Boolean) -> Unit,
+) {
     val flight by vm.flight.collectAsState()
     val photo by vm.photo.collectAsState()
     val prefs by vm.prefs.collectAsState()
     val refreshing by vm.refreshing.collectAsState()
     val track by vm.track.collectAsState()
+    val profile by vm.profile.collectAsState()
+    val aircraftLegs by vm.aircraftLegs.collectAsState()
     var confirm by remember { mutableStateOf(false) }
     val row = flight ?: return
     var seat by remember(row.id, row.seat) { mutableStateOf(row.seat.orEmpty()) }
@@ -211,20 +223,31 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
 
                     Spacer(Modifier.height(16.dp))
                     Row(Modifier.fillMaxWidth()) {
-                        Column(Modifier.weight(1f)) {
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .then(airportClick(row.fromIata, arrivals = false, onAirport)),
+                        ) {
                             Text(
                                 row.fromIata.orEmpty().ifBlank { "—" },
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = if (tablet) 36.sp else 30.sp),
+                                color = if (row.fromIata.isNullOrBlank()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
                             )
                             Text(row.fromCity.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             standLine(row.gate, row.terminal, row.checkInDesk)?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .then(airportClick(row.toIata, arrivals = true, onAirport)),
+                            horizontalAlignment = Alignment.End,
+                        ) {
                             Text(
                                 row.toIata.orEmpty().ifBlank { "—" },
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = if (tablet) 36.sp else 30.sp),
+                                color = if (row.toIata.isNullOrBlank()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
                             )
                             Text(row.toCity.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             listOfNotNull(
@@ -298,7 +321,9 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
                 }
             }
 
-            FlightOpsCards(row, units, language)
+            profile?.let { FlightProfileCard(it, onAirport) }
+            FlightOpsCards(row, units, language, hidePunctuality = profile != null)
+            AircraftHistoryCard(row.registration, aircraftLegs, onAirport)
 
             TonalCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -335,6 +360,23 @@ fun FlightDetailScreen(tablet: Boolean, vm: FlightDetailViewModel, onBack: () ->
             dismissButton = { TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.flight_delete_cancel)) } },
         )
     }
+}
+
+@Composable
+private fun airportClick(
+    code: String?,
+    arrivals: Boolean,
+    onAirport: (String, Boolean) -> Unit,
+): Modifier {
+    val iata = code?.trim()?.uppercase().orEmpty()
+    if (iata.length !in 3..4) return Modifier
+    val label = stringResource(R.string.airport_open, iata)
+    return Modifier
+        .clickable { onAirport(iata, arrivals) }
+        .semantics {
+            role = Role.Button
+            contentDescription = label
+        }
 }
 
 @Composable

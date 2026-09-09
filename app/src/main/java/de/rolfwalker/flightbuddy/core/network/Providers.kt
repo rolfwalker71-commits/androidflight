@@ -12,10 +12,12 @@ import de.rolfwalker.flightbuddy.core.domain.callsignMatches
 import de.rolfwalker.flightbuddy.core.domain.callsignPrefix
 import de.rolfwalker.flightbuddy.core.domain.compactCallsign
 import de.rolfwalker.flightbuddy.core.domain.mapProviderStatus
+import de.rolfwalker.flightbuddy.core.DateTimeFmt
 import de.rolfwalker.flightbuddy.core.domain.paddedIataFlightNumbers
 import de.rolfwalker.flightbuddy.core.domain.stripFlightZeros
 import de.rolfwalker.flightbuddy.core.model.AircraftPhoto
 import de.rolfwalker.flightbuddy.core.model.FlightSearchResult
+import de.rolfwalker.flightbuddy.core.model.FlightStatus
 import de.rolfwalker.flightbuddy.core.model.SearchReason
 import android.os.NetworkOnMainThreadException
 import android.util.Log
@@ -36,6 +38,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.SSLException
@@ -112,6 +115,15 @@ data class AircraftInfo(
     val type: String? = null,
     val operator: String? = null,
     val ageYears: Int? = null,
+)
+
+data class HistoricOpenSkyLeg(
+    val icao24: String,
+    val callsign: String?,
+    val fromIcao: String?,
+    val toIcao: String?,
+    val firstSeen: Long?,
+    val lastSeen: Long?,
 )
 
 data class AeroLookup(
@@ -464,9 +476,299 @@ class ProviderClients(
         return fetchAeroList(keys, path)
     }
 
-    suspend fun searchAeroAirportDepartures(keys: ApiKeys, fromIata: String, date: LocalDate): AeroLookup {
+    suspend fun searchAeroAirportDepartures(keys: ApiKeys, fromIata: String, date: LocalDate): AeroLookup =
+        searchAirportBoard(keys, fromIata, date, arrivals = false)
+
+    suspend fun searchFr24Number(keys: ApiKeys, flightNumber: String, date: LocalDate): AeroLookup {
+        val token = sanitizeApiCredential(keys.fr24Token)
+        if (token.isBlank() || !keys.fr24Enabled) return AeroLookup(emptyList(), SearchReason.UNCONFIGURED)
+        val number = normalizeFlightNumber(flightNumber)
+        val from = date.minusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val to = date.plusDays(2).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val fromIso = Instant.ofEpochMilli(from).atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        val toIso = Instant.ofEpochMilli(to).atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        val hist = fetchFr24Summaries(keys, flights = number, fromIso = fromIso, toIso = toIso, limit = 20)
+            .mapNotNull { summaryToSearchResult(it) }
+        val flights = paddedIataFlightNumbers(number).take(2).joinToString(",")
+        val live = if (flights.isNotBlank()) {
+            fr24JsonArray(keys, "/api/live/flight-positions/full?flights=$flights&limit=15")
+                .mapNotNull { mapFr24LiveSearch(it) }
+        } else {
+            emptyList()
+        }
+        val merged = linkedMapOf<String, FlightSearchResult>()
+        for (row in hist + live) {
+            val key = listOf(
+                stripFlightZeros(compactCallsign(row.flightNumber)),
+                row.fromIata.orEmpty(),
+                row.toIata.orEmpty(),
+            ).joinToString("|")
+            val prev = merged[key]
+            if (prev == null || (prev.liveLat == null && row.liveLat != null)) merged[key] = row
+            else if (row.liveLat != null) {
+                merged[key] = prev.copy(
+                    liveLat = row.liveLat,
+                    liveLon = row.liveLon,
+                    liveAltitudeFt = row.liveAltitudeFt,
+                    liveVelocityKts = row.liveVelocityKts,
+                    liveHeading = row.liveHeading,
+                    callsign = row.callsign ?: prev.callsign,
+                    registration = prev.registration ?: row.registration,
+                    icao24 = row.icao24 ?: prev.icao24,
+                    estimatedArr = row.estimatedArr ?: prev.estimatedArr,
+                    status = if (row.status == FlightStatus.EN_ROUTE) FlightStatus.EN_ROUTE else prev.status,
+                    source = "fr24",
+                )
+            }
+        }
+        val rows = merged.values.toList()
+        return AeroLookup(rows, if (rows.isEmpty()) SearchReason.EMPTY else SearchReason.OK)
+    }
+
+    suspend fun searchAirportBoard(
+        keys: ApiKeys,
+        iata: String,
+        date: LocalDate,
+        arrivals: Boolean,
+    ): AeroLookup {
+        val hasFr24 = sanitizeApiCredential(keys.fr24Token).isNotBlank() && keys.fr24Enabled
+        val hasOpenSky = sanitizeApiCredential(keys.openSkyUsername).isNotBlank()
+        if (!hasFr24 && !hasOpenSky) {
+            return AeroLookup(emptyList(), SearchReason.UNCONFIGURED)
+        }
+        val code = iata.trim().uppercase()
+        val info = fetchFr24Airport(keys, code)
+        val zone = DateTimeFmt.airportZone(info?.timezone)
+        val fromMs = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val toMs = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val merged = linkedMapOf<String, FlightSearchResult>()
+        fun put(row: FlightSearchResult) {
+            val key = listOf(
+                stripFlightZeros(compactCallsign(row.flightNumber)),
+                row.fromIata.orEmpty(),
+                row.toIata.orEmpty(),
+            ).joinToString("|")
+            val prev = merged[key]
+            if (prev == null || (prev.source == "opensky" && row.source == "fr24")) {
+                merged[key] = row
+            }
+        }
+        if (date == LocalDate.now()) {
+            fetchFr24AirportLive(keys, code, arrivals).forEach(::put)
+        }
+        val fromIso = Instant.ofEpochMilli(fromMs).atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        val toIso = Instant.ofEpochMilli(toMs).atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        fetchFr24Summaries(
+            keys,
+            airports = code,
+            fromIso = fromIso,
+            toIso = toIso,
+            limit = 80,
+        ).mapNotNull { summaryToBoardRow(it, code, arrivals) }.forEach(::put)
+        val icao = info?.icao?.trim()?.uppercase()
+        if (!icao.isNullOrBlank()) {
+            fetchOpenSkyAirportFlights(keys, icao, fromMs, toMs, arrivals).forEach(::put)
+        }
+        val rows = merged.values.sortedBy { row ->
+            if (arrivals) row.scheduledArr ?: row.estimatedArr ?: Long.MAX_VALUE
+            else row.scheduledDep ?: row.estimatedDep ?: Long.MAX_VALUE
+        }
+        return AeroLookup(rows, if (rows.isEmpty()) SearchReason.EMPTY else SearchReason.OK)
+    }
+
+    suspend fun searchAeroAirportBoard(
+        keys: ApiKeys,
+        iata: String,
+        date: LocalDate,
+        arrivals: Boolean,
+    ): AeroLookup {
         if (!keys.hasAeroDataBox()) return AeroLookup(emptyList(), SearchReason.UNCONFIGURED)
-        val path = "/flights/airports/iata/${encode(fromIata)}/$date/$date?direction=Departure&withCancelled=true"
+        val dir = if (arrivals) "Arrival" else "Departure"
+        val code = encode(iata.trim().uppercase())
+        val today = LocalDate.now()
+        if (date == today) {
+            return fetchAeroThrottled(
+                keys,
+                "/flights/airports/iata/$code?offsetMinutes=-120&durationMinutes=720" +
+                    "&direction=$dir&withCancelled=true&withLeg=true",
+            )
+        }
+        val day = date.toString()
+        val windows = listOf(
+            "${day}T00:00" to "${day}T12:00",
+            "${day}T12:00" to "${day}T23:59",
+        )
+        val merged = linkedMapOf<String, FlightSearchResult>()
+        var last = AeroLookup(emptyList(), SearchReason.EMPTY)
+        for ((from, to) in windows) {
+            val path = "/flights/airports/iata/$code/$from/$to?direction=$dir&withCancelled=true&withLeg=true"
+            val lookup = fetchAeroThrottled(keys, path)
+            last = lookup
+            if (lookup.reason == SearchReason.OK) {
+                for (row in lookup.flights) {
+                    val key = listOf(
+                        row.flightNumber,
+                        row.fromIata,
+                        row.toIata,
+                        (if (arrivals) row.scheduledArr else row.scheduledDep)?.toString().orEmpty(),
+                    ).joinToString("|")
+                    merged.putIfAbsent(key, row)
+                }
+            } else if (lookup.reason in setOf(SearchReason.MONTHLY_QUOTA, SearchReason.RATE_LIMITED)) {
+                return if (merged.isEmpty()) lookup else AeroLookup(merged.values.toList(), SearchReason.OK)
+            }
+        }
+        return if (merged.isNotEmpty()) AeroLookup(merged.values.toList(), SearchReason.OK)
+        else last
+    }
+
+    suspend fun fetchFr24AirportLive(
+        keys: ApiKeys,
+        iata: String,
+        arrivals: Boolean,
+    ): List<FlightSearchResult> {
+        val token = sanitizeApiCredential(keys.fr24Token)
+        if (token.isBlank() || !keys.fr24Enabled) return emptyList()
+        val code = iata.trim().uppercase()
+        if (code.length !in 3..4) return emptyList()
+        val dir = if (arrivals) "inbound" else "outbound"
+        val rows = fr24JsonArray(
+            keys,
+            "/api/live/flight-positions/full?airports=$dir:$code&limit=200",
+        )
+        return rows.mapNotNull { row -> mapFr24BoardRow(row, arrivals) }
+            .sortedBy { if (arrivals) it.estimatedArr ?: Long.MAX_VALUE else it.estimatedDep ?: Long.MAX_VALUE }
+    }
+
+    private fun mapFr24BoardRow(row: JSONObject, arrivals: Boolean): FlightSearchResult? {
+        val number = compactCallsign(row.optString("flight")).ifBlank {
+            compactCallsign(row.optString("callsign"))
+        }
+        if (number.isBlank()) return null
+        val from = row.optString("orig_iata").ifBlank { null }
+        val to = row.optString("dest_iata").ifBlank { null }
+        val airborne = !row.optBoolean("on_ground", false) &&
+            (finite(row.opt("alt"), row.opt("altitude")) ?: 0.0) > 50.0
+        val status = when {
+            airborne -> FlightStatus.EN_ROUTE
+            arrivals -> FlightStatus.LANDED
+            else -> FlightStatus.DEPARTED
+        }
+        val eta = parseTime(row.opt("eta"))
+        return FlightSearchResult(
+            flightNumber = number,
+            airlineIata = Regex("^([A-Z]{2})\\d").find(number)?.groupValues?.get(1),
+            airlineIcao = row.optString("painted_as").ifBlank { row.optString("operating_as") }.ifBlank { null },
+            fromIata = from,
+            toIata = to,
+            estimatedDep = if (arrivals) null else eta,
+            estimatedArr = if (arrivals) eta else null,
+            status = status,
+            aircraftType = row.optString("type").ifBlank { null },
+            registration = row.optString("reg").ifBlank { null },
+            icao24 = row.optString("hex").ifBlank { null }?.lowercase(),
+            callsign = row.optString("callsign").ifBlank { null },
+            liveLat = finite(row.opt("lat"), row.opt("latitude")),
+            liveLon = finite(row.opt("lon"), row.opt("lng"), row.opt("longitude")),
+            liveAltitudeFt = finite(row.opt("alt"), row.opt("altitude")),
+            liveVelocityKts = finite(row.opt("gspeed"), row.opt("speed")),
+            liveHeading = finite(row.opt("track"), row.opt("heading")),
+            source = "fr24",
+        )
+    }
+
+    private fun summaryToBoardRow(s: Fr24Summary, airport: String, arrivals: Boolean): FlightSearchResult? {
+        val here = airport.uppercase()
+        val dest = (s.destIataActual ?: s.destIata)?.uppercase()
+        val orig = s.origIata?.uppercase()
+        if (arrivals && dest != here) return null
+        if (!arrivals && orig != here) return null
+        val number = compactCallsign(s.flight).ifBlank { compactCallsign(s.callsign) }
+        if (number.isBlank()) return null
+        val status = when {
+            s.ended || s.landedAt != null -> FlightStatus.LANDED
+            s.takeoffAt != null -> FlightStatus.EN_ROUTE
+            else -> FlightStatus.SCHEDULED
+        }
+        return FlightSearchResult(
+            flightNumber = number,
+            airlineIata = Regex("^([A-Z]{2})\\d").find(number)?.groupValues?.get(1),
+            airlineIcao = s.paintedAs ?: s.operatingAs,
+            fromIata = orig,
+            toIata = dest,
+            scheduledDep = s.takeoffAt ?: s.firstSeen,
+            scheduledArr = s.landedAt ?: s.lastSeen,
+            status = status,
+            aircraftType = s.type,
+            registration = s.reg,
+            callsign = s.callsign,
+            source = "fr24",
+        )
+    }
+
+    private fun summaryToSearchResult(s: Fr24Summary): FlightSearchResult? {
+        val number = compactCallsign(s.flight).ifBlank { compactCallsign(s.callsign) }
+        if (number.isBlank()) return null
+        val status = when {
+            s.ended || s.landedAt != null -> FlightStatus.LANDED
+            s.takeoffAt != null -> FlightStatus.EN_ROUTE
+            else -> FlightStatus.SCHEDULED
+        }
+        return FlightSearchResult(
+            flightNumber = number,
+            airlineIata = Regex("^([A-Z]{2})\\d").find(number)?.groupValues?.get(1),
+            airlineIcao = s.paintedAs ?: s.operatingAs,
+            fromIata = s.origIata,
+            toIata = s.destIataActual ?: s.destIata,
+            scheduledDep = s.takeoffAt ?: s.firstSeen,
+            scheduledArr = s.landedAt ?: s.lastSeen,
+            actualDep = s.takeoffAt,
+            actualArr = s.landedAt,
+            status = status,
+            aircraftType = s.type,
+            registration = s.reg,
+            callsign = s.callsign,
+            source = "fr24",
+        )
+    }
+
+    private fun mapFr24LiveSearch(row: JSONObject): FlightSearchResult? {
+        val number = compactCallsign(row.optString("flight")).ifBlank {
+            compactCallsign(row.optString("callsign"))
+        }
+        if (number.isBlank()) return null
+        val airborne = !row.optBoolean("on_ground", false) &&
+            (finite(row.opt("alt"), row.opt("altitude")) ?: 0.0) > 50.0
+        return FlightSearchResult(
+            flightNumber = number,
+            airlineIata = Regex("^([A-Z]{2})\\d").find(number)?.groupValues?.get(1),
+            airlineIcao = row.optString("painted_as").ifBlank { row.optString("operating_as") }.ifBlank { null },
+            fromIata = row.optString("orig_iata").ifBlank { null },
+            toIata = row.optString("dest_iata").ifBlank { null },
+            estimatedArr = parseTime(row.opt("eta")),
+            status = when {
+                airborne -> FlightStatus.EN_ROUTE
+                row.optBoolean("on_ground", false) -> FlightStatus.DEPARTED
+                else -> FlightStatus.SCHEDULED
+            },
+            aircraftType = row.optString("type").ifBlank { null },
+            registration = row.optString("reg").ifBlank { null },
+            icao24 = row.optString("hex").ifBlank { null }?.lowercase(),
+            callsign = row.optString("callsign").ifBlank { null },
+            liveLat = finite(row.opt("lat"), row.opt("latitude")),
+            liveLon = finite(row.opt("lon"), row.opt("lng"), row.opt("longitude")),
+            liveAltitudeFt = finite(row.opt("alt"), row.opt("altitude")),
+            liveVelocityKts = finite(row.opt("gspeed"), row.opt("speed")),
+            liveHeading = finite(row.opt("track"), row.opt("heading")),
+            liveVerticalRateFpm = finite(row.opt("vspeed"), row.opt("vrate")),
+            source = "fr24",
+        )
+    }
+
+    private suspend fun fetchAeroThrottled(keys: ApiKeys, path: String): AeroLookup {
+        val wait = 1_250L - (System.currentTimeMillis() - lastAero.get())
+        if (wait > 0) delay(wait)
+        lastAero.set(System.currentTimeMillis())
         return fetchAeroList(keys, path)
     }
 
@@ -520,9 +822,16 @@ class ProviderClients(
                     val detail = httpDetail(res.code, body, res.message)
                     lastAeroError = redactProviderError(detail)
                     log("aerodatabox", url, res.code, false, lastAeroError, remaining)
+                    val reason = classifyAero(res.code, body).let { classified ->
+                        if (classified == SearchReason.RATE_LIMITED && remaining == 0) {
+                            SearchReason.MONTHLY_QUOTA
+                        } else {
+                            classified
+                        }
+                    }
                     return@withContext AeroLookup(
                         emptyList(),
-                        classifyAero(res.code, body),
+                        reason,
                         res.code,
                         lastAeroError,
                     )
@@ -716,7 +1025,8 @@ class ProviderClients(
     ): LiveFix? {
         val token = sanitizeApiCredential(keys.fr24Token)
         if (token.isBlank() || !keys.fr24Enabled) return null
-        val min = keys.fr24MinIntervalMs.toLong().coerceAtLeast(180_000)
+        val configured = keys.fr24MinIntervalMs.toLong()
+        val min = (if (configured >= 180_000L) 60_000L else configured).coerceAtLeast(45_000L)
         val since = System.currentTimeMillis() - lastFr24.get()
         if (!ignoreInterval && lastFr24.get() != 0L && since < min) return null
         lastFr24.set(System.currentTimeMillis())
@@ -851,6 +1161,7 @@ class ProviderClients(
         keys: ApiKeys,
         flights: String? = null,
         registrations: String? = null,
+        airports: String? = null,
         fromIso: String,
         toIso: String,
         limit: Int = 40,
@@ -865,7 +1176,8 @@ class ProviderClients(
         )
         if (!flights.isNullOrBlank()) params += "flights=${flights.replace(Regex("[\\s-]+"), "")}"
         if (!registrations.isNullOrBlank()) params += "registrations=${registrations.replace(" ", "")}"
-        if (flights.isNullOrBlank() && registrations.isNullOrBlank()) return emptyList()
+        if (!airports.isNullOrBlank()) params += "airports=${airports.replace(Regex("\\s+"), "")}"
+        if (flights.isNullOrBlank() && registrations.isNullOrBlank() && airports.isNullOrBlank()) return emptyList()
         val path = "/api/flight-summary/full?${params.joinToString("&")}"
         return fr24JsonArray(keys, path).mapNotNull { mapFr24Summary(it) }
     }
@@ -969,6 +1281,161 @@ class ProviderClients(
             operator = obj.optJSONObject("airline")?.optString("name")?.ifBlank { obj.optString("operator") }?.ifBlank { null },
             ageYears = age,
         )
+    }
+
+    suspend fun fetchFr24HistoricTrack(
+        keys: ApiKeys,
+        fr24Id: String?,
+        flightNumber: String?,
+        aroundMs: Long?,
+    ): List<de.rolfwalker.flightbuddy.core.model.LatLon> {
+        val token = sanitizeApiCredential(keys.fr24Token)
+        if (token.isBlank() || !keys.fr24Enabled) return emptyList()
+        if (!fr24Id.isNullOrBlank()) {
+            val pts = positionsFromFr24(
+                fr24JsonArray(keys, "/api/historic/flight-positions/full?flight_ids=${encode(fr24Id)}&limit=1500"),
+            )
+            if (pts.size >= 2) return pts
+        }
+        val flight = compactCallsign(flightNumber)
+        if (flight.isNotBlank() && aroundMs != null && aroundMs > 0L) {
+            val ts = aroundMs / 1000L
+            return positionsFromFr24(
+                fr24JsonArray(keys, "/api/historic/flight-positions/full?flights=$flight&timestamp=$ts&limit=800"),
+            )
+        }
+        return emptyList()
+    }
+
+    suspend fun fetchOpenSkyAircraftFlights(
+        keys: ApiKeys,
+        icao24: String,
+        fromMs: Long,
+        toMs: Long,
+    ): List<HistoricOpenSkyLeg> {
+        val hex = icao24.lowercase().trim()
+        if (hex.isBlank()) return emptyList()
+        return fetchOpenSkyFlightList(
+            keys,
+            "https://opensky-network.org/api/flights/aircraft?icao24=$hex&begin=${unixRange(fromMs, toMs).first}&end=${unixRange(fromMs, toMs).second}",
+            hex,
+        )
+    }
+
+    suspend fun fetchOpenSkyAirportFlights(
+        keys: ApiKeys,
+        icao: String,
+        fromMs: Long,
+        toMs: Long,
+        arrivals: Boolean,
+    ): List<FlightSearchResult> {
+        val code = icao.trim().uppercase()
+        if (code.length != 4) return emptyList()
+        val (begin, end) = unixRange(fromMs, toMs)
+        val kind = if (arrivals) "arrival" else "departure"
+        val legs = fetchOpenSkyFlightList(
+            keys,
+            "https://opensky-network.org/api/flights/$kind?airport=$code&begin=$begin&end=$end",
+        )
+        return legs.mapNotNull { o ->
+            val number = compactCallsign(o.callsign)
+            if (number.isBlank()) return@mapNotNull null
+            FlightSearchResult(
+                flightNumber = number,
+                airlineIata = Regex("^([A-Z]{2})\\d").find(number)?.groupValues?.get(1),
+                fromIata = o.fromIcao,
+                toIata = o.toIcao,
+                scheduledDep = o.firstSeen,
+                scheduledArr = o.lastSeen,
+                status = if (arrivals) FlightStatus.LANDED else FlightStatus.DEPARTED,
+                icao24 = o.icao24,
+                callsign = o.callsign,
+                source = "opensky",
+            )
+        }
+    }
+
+    private fun unixRange(fromMs: Long, toMs: Long): Pair<Long, Long> {
+        val begin = (fromMs / 1000L).coerceAtLeast(0L)
+        val end = (toMs / 1000L).coerceAtLeast(begin + 60L)
+        return begin to end
+    }
+
+    private suspend fun fetchOpenSkyFlightList(
+        keys: ApiKeys,
+        url: String,
+        fallbackHex: String? = null,
+    ): List<HistoricOpenSkyLeg> {
+        val token = openSkyBearer(keys)?.let { sanitizeApiCredential(it) }
+        return try {
+            val req = Request.Builder().url(url).header("Accept", "application/json").apply {
+                if (!token.isNullOrBlank()) header("Authorization", "Bearer $token")
+            }.build()
+            withContext(Dispatchers.IO) {
+                http.newCall(req).execute().use { res ->
+                    val body = res.body?.string().orEmpty()
+                    if (!res.isSuccessful) {
+                        lastOpenSkyError = redactProviderError("${res.code} ${body.take(80)}")
+                        return@withContext emptyList()
+                    }
+                    lastOpenSkyError = null
+                    val arr = if (body.trim().startsWith("[")) JSONArray(body) else JSONArray()
+                    (0 until arr.length()).mapNotNull { i ->
+                        val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                        HistoricOpenSkyLeg(
+                            icao24 = o.optString("icao24").ifBlank { fallbackHex }.orEmpty(),
+                            callsign = o.optString("callsign").trim().ifBlank { null },
+                            fromIcao = o.optString("estDepartureAirport").ifBlank { null },
+                            toIcao = o.optString("estArrivalAirport").ifBlank { null },
+                            firstSeen = o.optLong("firstSeen").takeIf { it > 0L }?.times(1000L),
+                            lastSeen = o.optLong("lastSeen").takeIf { it > 0L }?.times(1000L),
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            lastOpenSkyError = redactProviderError(e.message)
+            emptyList()
+        }
+    }
+
+    private fun positionsFromFr24(rows: List<JSONObject>): List<de.rolfwalker.flightbuddy.core.model.LatLon> {
+        val pts = mutableListOf<Triple<Long, Double, Double>>()
+        fun add(obj: JSONObject?) {
+            if (obj == null) return
+            val lat = finite(obj.opt("lat"), obj.opt("latitude"))
+            val lon = finite(obj.opt("lon"), obj.opt("lng"), obj.opt("longitude"))
+            val at = parseTime(
+                obj.opt("timestamp") ?: obj.opt("position_time") ?: obj.opt("seen") ?: obj.opt("datetime"),
+            )
+            if (lat != null && lon != null && lat.isFinite() && lon.isFinite()) {
+                pts += Triple(at ?: 0L, lat, lon)
+            }
+            val nested = obj.optJSONArray("positions") ?: obj.optJSONArray("trail") ?: obj.optJSONArray("track")
+            if (nested != null) {
+                for (i in 0 until nested.length()) {
+                    val child = nested.optJSONObject(i)
+                    if (child != null) {
+                        add(child)
+                        continue
+                    }
+                    val arr = nested.optJSONArray(i) ?: continue
+                    val a0 = arr.optDouble(0, Double.NaN)
+                    val a1 = arr.optDouble(1, Double.NaN)
+                    val a2 = arr.optDouble(2, Double.NaN)
+                    when {
+                        a1.isFinite() && a2.isFinite() && a1 in -90.0..90.0 && a2 in -180.0..180.0 ->
+                            pts += Triple((a0.takeIf { it.isFinite() && it > 1_000 }?.toLong()?.let { if (it < 1e12) it * 1000 else it } ?: 0L), a1, a2)
+                        a0.isFinite() && a1.isFinite() && a0 in -90.0..90.0 && a1 in -180.0..180.0 ->
+                            pts += Triple(0L, a0, a1)
+                    }
+                }
+            }
+        }
+        rows.forEach { add(it) }
+        return pts.sortedBy { it.first }
+            .map { de.rolfwalker.flightbuddy.core.model.LatLon(it.second, it.third) }
+            .distinct()
     }
 
     suspend fun fetchOpenSkyTrack(keys: ApiKeys, icao24: String): List<de.rolfwalker.flightbuddy.core.model.LatLon> {

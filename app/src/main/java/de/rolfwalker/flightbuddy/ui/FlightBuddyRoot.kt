@@ -60,6 +60,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import de.rolfwalker.flightbuddy.R
 import de.rolfwalker.flightbuddy.core.ui.Wordmark
+import de.rolfwalker.flightbuddy.feature.airport.AirportBoardScreen
+import de.rolfwalker.flightbuddy.feature.airport.AirportBoardViewModel
 import de.rolfwalker.flightbuddy.feature.alerts.AlertsScreen
 import de.rolfwalker.flightbuddy.feature.alerts.AlertsViewModel
 import de.rolfwalker.flightbuddy.feature.flights.AddFlightSheet
@@ -106,7 +108,10 @@ fun FlightBuddyRoot(
     val homeVm: HomeViewModel = koinViewModel()
     val homeState by homeVm.state.collectAsState()
     val unread = homeState.unread
-    val showDock = !tablet && route?.startsWith("flight/") != true && route != "add"
+    val showDock = !tablet &&
+        route?.startsWith("flight/") != true &&
+        route?.startsWith("airport/") != true &&
+        route != "add"
 
     LaunchedEffect(openFlightId, openAlerts) {
         if (openFlightId != null) nav.navigate("flight/$openFlightId")
@@ -209,7 +214,26 @@ fun FlightBuddyRoot(
                 composable("flight/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
                     val id = entry.arguments?.getString("id") ?: return@composable
                     val vm: de.rolfwalker.flightbuddy.feature.flights.FlightDetailViewModel = koinViewModel(parameters = { parametersOf(id) })
-                    FlightDetailScreen(tablet = tablet, vm = vm, onBack = { nav.popBackStack() })
+                    FlightDetailScreen(
+                        tablet = tablet,
+                        vm = vm,
+                        onBack = { nav.popBackStack() },
+                        onAirport = { code, arrivals ->
+                            nav.navigate("airport/$code/${if (arrivals) "arr" else "dep"}")
+                        },
+                    )
+                }
+                composable(
+                    "airport/{code}/{dir}",
+                    arguments = listOf(
+                        navArgument("code") { type = NavType.StringType },
+                        navArgument("dir") { type = NavType.StringType },
+                    ),
+                ) { entry ->
+                    val code = entry.arguments?.getString("code") ?: return@composable
+                    val arrivals = entry.arguments?.getString("dir") == "arr"
+                    val vm: AirportBoardViewModel = koinViewModel(parameters = { parametersOf(code, arrivals) })
+                    AirportBoardScreen(vm = vm, onBack = { nav.popBackStack() })
                 }
             }
         }

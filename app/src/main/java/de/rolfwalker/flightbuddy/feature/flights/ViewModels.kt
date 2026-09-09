@@ -6,6 +6,8 @@ import de.rolfwalker.flightbuddy.core.data.FlightRepository
 import de.rolfwalker.flightbuddy.core.data.db.FlightEntity
 import de.rolfwalker.flightbuddy.core.data.prefs.PrefsStore
 import de.rolfwalker.flightbuddy.core.data.prefs.UserPrefs
+import de.rolfwalker.flightbuddy.core.domain.FlightProfile
+import de.rolfwalker.flightbuddy.core.domain.HistoricLeg
 import de.rolfwalker.flightbuddy.core.domain.LogbookStats
 import de.rolfwalker.flightbuddy.core.domain.computeLogbookStats
 import de.rolfwalker.flightbuddy.core.domain.connectionBetween
@@ -21,6 +23,7 @@ import de.rolfwalker.flightbuddy.core.model.SearchReason
 import de.rolfwalker.flightbuddy.core.data.prefs.isInvalidApiCredentialException
 import de.rolfwalker.flightbuddy.core.data.prefs.redactProviderError
 import de.rolfwalker.flightbuddy.core.network.ProviderClients
+import de.rolfwalker.flightbuddy.tracking.InsightEngine
 import de.rolfwalker.flightbuddy.tracking.PollEngine
 import de.rolfwalker.flightbuddy.tracking.TrackerController
 import kotlinx.coroutines.Dispatchers
@@ -182,6 +185,7 @@ class FlightDetailViewModel(
     private val providers: ProviderClients,
     prefsStore: PrefsStore,
     private val engine: PollEngine,
+    private val insights: InsightEngine,
 ) : ViewModel() {
     private val keys = org.koin.java.KoinJavaComponent.get<de.rolfwalker.flightbuddy.core.data.prefs.KeysStore>(
         de.rolfwalker.flightbuddy.core.data.prefs.KeysStore::class.java,
@@ -189,6 +193,8 @@ class FlightDetailViewModel(
     val flight = repo.observeFlight(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val photo = MutableStateFlow<AircraftPhoto?>(null)
     val refreshing = MutableStateFlow(false)
+    val profile = MutableStateFlow<FlightProfile?>(null)
+    val aircraftLegs = MutableStateFlow<List<HistoricLeg>>(emptyList())
     val prefs = prefsStore.flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UserPrefs())
     private val officialTrack = MutableStateFlow<List<LatLon>>(emptyList())
     val track = combine(repo.observePositions(id), officialTrack) { rows, extra ->
@@ -199,17 +205,46 @@ class FlightDetailViewModel(
     init {
         refreshLive()
         viewModelScope.launch {
+            var profileStarted = false
+            var aircraftStarted = false
+            var trackStarted = false
+            var lastFr24Id: String? = null
             repo.observeFlight(id).collect { row ->
-                val reg = row?.registration
+                if (row == null) return@collect
+                val reg = row.registration
                 if (!reg.isNullOrBlank() && photo.value == null) {
                     photo.value = providers.planespottersPhoto(reg)
                 }
-                val hex = row?.icao24
-                if (!hex.isNullOrBlank() && officialTrack.value.isEmpty()) {
-                    officialTrack.value = providers.fetchOpenSkyTrack(keys.snapshot(), hex)
+                if (!profileStarted) {
+                    profileStarted = true
+                    launch { profile.value = insights.flightProfile(row, keys.snapshot()) }
+                }
+                if (!aircraftStarted && (!reg.isNullOrBlank() || !row.icao24.isNullOrBlank())) {
+                    aircraftStarted = true
+                    launch { aircraftLegs.value = insights.aircraftLegs(row, keys.snapshot()) }
+                }
+                val canTrack = isPastStatus(row.status) ||
+                    !row.icao24.isNullOrBlank() ||
+                    !row.fr24Id.isNullOrBlank()
+                if (!trackStarted && canTrack) {
+                    trackStarted = true
+                    lastFr24Id = row.fr24Id
+                    launch { mergeOfficialTrack(row) }
+                } else if (
+                    isPastStatus(row.status) &&
+                    !row.fr24Id.isNullOrBlank() &&
+                    row.fr24Id != lastFr24Id
+                ) {
+                    lastFr24Id = row.fr24Id
+                    launch { mergeOfficialTrack(row) }
                 }
             }
         }
+    }
+
+    private suspend fun mergeOfficialTrack(row: FlightEntity) {
+        val hist = insights.historicTrack(row, keys.snapshot())
+        if (hist.size > officialTrack.value.size) officialTrack.value = hist
     }
 
     fun refreshLive() {

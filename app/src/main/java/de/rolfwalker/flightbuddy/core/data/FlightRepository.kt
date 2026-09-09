@@ -56,9 +56,14 @@ class FlightRepository(
         val day = date ?: LocalDate.now()
         return when (val parsed = parseFlightQuery(query)) {
             is FlightQuery.Unknown -> AeroLookup(emptyList(), SearchReason.UNKNOWN_QUERY)
-            is FlightQuery.Number -> providers.searchAeroNumber(keys.snapshot(), parsed.flightNumber, day, user = true)
+            is FlightQuery.Number -> {
+                val snap = keys.snapshot()
+                val fr24 = providers.searchFr24Number(snap, parsed.flightNumber, day)
+                if (fr24.reason == SearchReason.OK && fr24.flights.isNotEmpty()) fr24
+                else providers.searchAeroNumber(snap, parsed.flightNumber, day, user = true)
+            }
             is FlightQuery.Route -> {
-                val lookup = providers.searchAeroAirportDepartures(keys.snapshot(), parsed.from, day)
+                val lookup = providers.searchAirportBoard(keys.snapshot(), parsed.from, day, arrivals = false)
                 if (lookup.reason != SearchReason.OK && lookup.reason != SearchReason.EMPTY) return lookup
                 val filtered = lookup.flights.filter { it.toIata.equals(parsed.to, true) }
                 if (filtered.isNotEmpty()) AeroLookup(filtered, SearchReason.OK)
